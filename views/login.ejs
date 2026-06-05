@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRISM - Autenticazione</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* --- STESSI IDENTICI COLORI E PRESET DELLA DASHBOARD --- */
+        :root {
+            --bg-color: #000000;
+            --input-bg: #0d0d0d;
+            --border-grey: #262626;
+            --text-main: #ffffff;
+            --text-dim: #71717a;
+            --accent-blue: #2563eb;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            display: none !important; /* Nasconde tutto finché non toglierai il redirect sopra */
+        }
+        /* body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        } */
+
+        /* --- CARD DI LOGIN INTEGRATA NEL DESIGN SYSTEM --- */
+        .login-card {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-grey);
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .logo-area {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-img {
+            height: auto;
+            width: 140px;
+            display: block;
+        }
+
+        .auth-subtitle {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-top: -15px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        /* --- CAMPI DI INPUT RILEVATI DA WORKSPACE --- */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .input-wrapper {
+            position: relative;
+            background: var(--input-bg);
+            border: 1px solid var(--border-grey);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-wrapper i {
+            position: absolute;
+            left: 15px;
+            color: var(--text-dim);
+            font-size: 18px; /* <--- Icone ingrandite da 14px a 18px */
+        }
+
+        .input-wrapper input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: #fff;
+            padding: 14px 15px 14px 46px; /* <--- Aumentato a 46px per non sovrapporsi alle icone grandi */
+            font-size: 14px;
+            outline: none;
+        }
+
+        /* --- PULSANTE GENERA STYLE --- */
+        .submit-btn {
+            width: 100%;
+            background: var(--accent-blue);
+            color: #fff;
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: background 0.2s, opacity 0.2s;
+            margin-top: 10px;
+        }
+        .submit-btn:hover { background: #1d4ed8; }
+
+        /* --- ALERT BOX INTERNO --- */
+        .alert-box {
+            display: none;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+        .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
+        .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
+
+        /* --- SWITCH FOOTER --- */
+        .switch-footer {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-t: 1px solid var(--border-grey);
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .switch-link {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        .switch-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <div class="logo-area">
+            <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo" class="logo-img">
+        </div>
+        
+        <p class="auth-subtitle" id="auth-subtitle">Inserisci le credenziali operative del tuo Cluster.</p>
+
+        <div id="alert-box" class="alert-box"></div>
+
+        <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+            <div class="form-group">
+                <label class="form-label">Indirizzo Email</label>
+                <div class="input-wrapper">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="email" required placeholder="nome@company.it">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Chiave d'Accesso</label>
+                <div class="input-wrapper">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="password" required placeholder="••••••••">
+                </div>
+            </div>
+
+            <button type="submit" id="submit-btn" class="submit-btn">
+                Accedi al Sistema
+            </button>
+        </form>
+
+        <div class="switch-footer">
+            <span id="switch-text">Sei un professionista autonomo?</span>
+            <span onclick="toggleAuthMode()" id="switch-btn" class="switch-link">Registrati</span>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <script src="/firebase-config.js"></script>
+    <script>
+        //Da decommentare
+        window.location.href = "/";
+        initFirebaseConfig("<%= env %>");
+    </script>
+
+    <script>
+        let isLoginMode = true;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('error') === 'profile_not_found') {
+                showAlert("error", "Profilo non registrato su Firestore.");
+            } else if (urlParams.get('error') === 'no_company_assigned') {
+                showAlert("error", "Nessun cluster aziendale associato a questa utenza.");
+            }
+        });
+
+        function showAlert(type, message) {
+            const box = document.getElementById('alert-box');
+            box.innerText = message;
+            box.style.display = "block";
+            box.className = `alert-box ${type === 'error' ? 'alert-error' : 'alert-success'}`;
+        }
+
+        function toggleAuthMode() {
+            isLoginMode = !isLoginMode;
+            const subtitle = document.getElementById('auth-subtitle');
+            const submitBtn = document.getElementById('submit-btn');
+            const switchText = document.getElementById('switch-text');
+            const switchBtn = document.getElementById('switch-btn');
+
+            if (isLoginMode) {
+                subtitle.innerText = "Inserisci le credenziali operative del tuo Cluster.";
+                submitBtn.innerText = "Accedi al Sistema";
+                switchText.innerText = "Sei un professionista autonomo?";
+                switchBtn.innerText = "Registrati";
+            } else {
+                subtitle.innerText = "Inizializza un ambiente autonomo di calcolo e archivio.";
+                submitBtn.innerText = "Crea Spazio Lavoro";
+                switchText.innerText = "Hai già delle credenziali?";
+                switchBtn.innerText = "Accedi";
+            }
+        }
+
+        async function handleAuthSubmit(event) {
+    event.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const btn = document.getElementById('submit-btn');
+
+    btn.disabled = true;
+    btn.style.opacity = "0.5";
+
+    if (isLoginMode) {
+        try {
+            // 🟢 1. Eseguiamo l'autenticazione su Firebase
+            const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+
+            // 🟢 2. SALVATAGGIO DI SICUREZZA: Scriviamo l'UID reale nella sessione del browser
+            // Questo azzera i problemi di asincronia al caricamento della Dashboard
+            sessionStorage.setItem("prism_user_uid", user.uid);
+
+            showAlert("success", "Autenticazione eseguita. Accesso...");
+            setTimeout(() => { window.location.href = "/dashboard"; }, 800);
+        } catch (error) {
+            showAlert("error", "Credenziali non valide.");
+            btn.disabled = false;
+            btn.style.opacity = "1";
+        }
+    } else {
+        try {
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            const generatedCompanyId = `company_${user.uid}`;
+
+            const batch = window.db.batch();
+
+            // Creazione Company Speculare per Singolo
+            const companyRef = window.db.collection("companies").doc(generatedCompanyId);
+            batch.set(companyRef, {
+                name: `Privato (${email.split('@')[0]})`,
+                is_corporate: false,
+                created_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Creazione Utente
+            const userRef = window.db.collection("users").doc(user.uid);
+            batch.set(userRef, {
+                company_id: generatedCompanyId,
+                role: "owner",
+                email: email,
+                created_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            await batch.commit();
+
+            // 🟢 Salviamo l'UID anche in fase di registrazione autonoma
+            sessionStorage.setItem("prism_user_uid", user.uid);
+
+            showAlert("success", "Ambiente configurato! Configurazione in corso...");
+            setTimeout(() => { window.location.href = "/dashboard"; }, 1000);
+
+        } catch (error) {
+            showAlert("error", `Errore: ${error.message}`);
+            btn.disabled = false;
+            btn.style.opacity = "1";
+        }
+    }
+}
+    </script>
+</body>
+</html>

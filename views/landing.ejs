@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- SEO E META TAG -->
+    <title>PRISM | AI Editorial Intelligence Engine per Content Strategy</title>
+    <meta name="description" content="PRISM è il motore editoriale AI che trasforma un singolo input in una strategia di contenuti professionali multi-piattaforma. Scopri l'intelligenza editoriale del futuro.">
+    <meta name="keywords" content="motore editoriale AI, intelligenza editoriale, content strategy AI, AI per contenuti professionali, generazione testi social">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="PRISM | AI Editorial Intelligence">
+    <meta property="og:description" content="Oltre la semplice generazione: il primo motore di rifrazione editoriale professionale.">
+    <meta property="og:type" content="website">
+
+    <!-- JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "PRISM",
+      "applicationCategory": "BusinessApplication, ContentGeneration",
+      "operatingSystem": "Web",
+      "description": "Motore editoriale AI che trasforma un'idea in contenuti professionali multi-piattaforma attraverso un sistema di rifrazione intelligente.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0.00",
+        "priceCurrency": "EUR",
+        "availability": "https://schema.org/PreOrder"
+      },
+      "creator": {
+        "@type": "Organization",
+        "name": "PRISM AI"
+      }
+    }
+    </script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #030303;
+            --accent: #7f5cff;
+            --rainbow: linear-gradient(to right, #3b82f6, #10b981, #f59e0b, #ef4444, #a855f7, #ec4899);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: #fff;
+            overflow-x: hidden;
+            letter-spacing: -0.01em;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* --- ATMOSPHERIC BACKGROUND --- */
+        .glow {
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(127,92,255,0.12), rgba(0,0,0,0));
+            position: absolute;
+            top: 0; 
+            left: 50%;
+            transform: translateX(-50%);
+            filter: blur(100px);
+            z-index: 0;
+        }
+
+        /* --- HEADER & HERO --- */
+        header {
+            min-height: 70vh; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 60px 20px; 
+            position: relative;
+        }
+
+        .logo {
+            width: 180px; 
+            height: auto;
+            margin-bottom: 30px;
+            z-index: 2;
+            opacity: 0.95;
+            display: block; 
+        }
+
+        h1 {
+            font-size: clamp(32px, 5vw, 64px);
+            font-weight: 800;
+            line-height: 1.2; 
+            max-width: 950px;
+            margin: 0 auto 25px auto;
+            z-index: 2;
+            background: linear-gradient(to bottom, #fff, #999);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            padding-bottom: 0.15em; 
+        }
+
+        .h1-seo {
+            display: block;
+            font-size: 14px;
+            background: var(--rainbow);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .hero-p {
+            font-size: 20px;
+            font-weight: 300;
+            color: #888;
+            max-width: 700px;
+            margin-bottom: 30px;
+            z-index: 2;
+        }
+
+        /* --- THE WAITLIST --- */
+        .waitlist-container {
+            z-index: 2;
+            width: 100%;
+            max-width: 450px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            background: #0f0f11;
+            padding: 2px;
+            border-radius: 16px;
+            display: flex;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        input[type="email"] {
+            background: transparent;
+            border: none;
+            padding: 15px 20px;
+            color: white;
+            flex: 1;
+            outline: none;
+            font-size: 16px;
+        }
+
+        .cta {
+            background: #fff;
+            color: #000;
+            padding: 0 30px;
+            border-radius: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            transition: 0.3s;
+            margin: 4px;
+        }
+
+        .cta:hover {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 0 30px rgba(127,92,255,0.3);
+        }
+
+        /* --- CONTENT --- */
+        .main-content {
+            position: relative;
+            z-index: 2;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .section {
+            padding: 80px 0;
+            text-align: center;
+        }
+
+        .market-tag {
+            display: inline-block;
+            padding: 6px 18px;
+            border-radius: 30px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #71717a;
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 50px;
+            margin-top: 40px;
+        }
+
+        .item h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--accent);
+            margin-bottom: 20px;
+        }
+
+        .item p {
+            font-size: 18px;
+            color: #aaa;
+            line-height: 1.7;
+            font-weight: 300;
+        }
+
+        .divider {
+            height: 1px;
+            width: 100px;
+            background: var(--rainbow);
+            margin: 40px auto;
+            opacity: 0.3;
+        }
+
+        .manifesto-section {
+            text-align: center;
+            padding: 80px 20px;
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .manifesto-text {
+            font-size: 24px;
+            font-weight: 300;
+            line-height: 1.6;
+            color: #fff;
+        }
+
+        .manifesto-text strong {
+            font-weight: 600;
+            background: var(--rainbow);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Simbolo del punto luce */
+        .light-source {
+            width: 2px;
+            height: 50px;
+            background: var(--rainbow);
+            margin: 0 auto 30px auto;
+            box-shadow: 0 0 20px var(--accent);
+        }
+
+        /* --- FOOTER FIX --- */
+        footer {
+            width: 100%;
+            padding: 60px 20px;
+            text-align: center;
+            color: #444;
+            font-size: 10px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: #030303;
+            margin-top: auto;
+        }
+
+        footer p { margin: 8px 0; }
+        strong { color: #fff; font-weight: 600; }
+    </style>
+</head>
+
+<body>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="/firebase-config.js"></script>
+
+    <script>
+        const currentEnv = "<%= env %>";
+        if (typeof initFirebaseConfig === 'function') {
+            initFirebaseConfig(currentEnv);
+            firebase.initializeApp(window.FIREBASE_ENV);
+            window.db = firebase.firestore();
+        }
+
+        async function joinWaitlist() {
+            const emailInput = document.getElementById('waitlist-email');
+            const btn = document.getElementById('waitlist-btn');
+            const successMsg = document.getElementById('waitlist-success');
+            const email = emailInput.value.trim();
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+            if (!email || !emailRegex.test(email)) {
+                alert("Inserisci un indirizzo email valido.");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "ATTENDI...";
+
+            try {
+                await window.db.collection("waitlist").add({
+                    email: email,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    date: new Date().toLocaleDateString('it-IT'),
+                    status: "pending",
+                    source: "main_landing"
+                });
+                document.querySelector('.input-group').style.display = 'none';
+                document.getElementById('privacy-note').style.display = 'none';
+                successMsg.style.display = 'block';
+            } catch (error) {
+                console.error(error);
+                alert("Errore. Riprova tra poco.");
+                btn.disabled = false;
+                btn.innerText = "ACCEDI";
+            }
+        }
+    </script>
+
+    <header>
+        <div class="glow"></div>
+        <img src="/images/logo_senza_sfondo.png" alt="PRISM AI" class="logo">
+        <span class="market-tag">The Next Gen Content Strategy Tool</span>
+        
+        <h1>
+            <span class="h1-seo">PRISM – AI Editorial Intelligence Engine</span>
+            L'unica intelligenza<br>oltre la generazione.
+        </h1>
+
+        <p class="hero-p">
+            PRISM trasforma il rumore generativo dell'AI comune in uno <strong>strumento professionale di content strategy</strong>. 
+        </p>
+
+        <div class="waitlist-container">
+            <p style="font-size: 11px; letter-spacing: 2px; color: var(--accent); text-transform: uppercase; margin-bottom: 18px; font-weight: 600; opacity: 0.8;">
+                <i class="fas fa-microchip" style="margin-right: 5px;"></i> Infrastruttura in fase di sviluppo
+            </p>
+
+            <div class="input-group">
+                <input type="email" id="waitlist-email" placeholder="Il tuo invito per la Beta...">
+                <button class="cta" id="waitlist-btn" onclick="joinWaitlist()">PRENOTATI</button>
+            </div>
+
+            <p id="privacy-note" style="font-size: 10px; color: #444; margin-top: 15px; text-transform: uppercase; letter-spacing: 1px; line-height: 1.5;">
+                Lascia la tua mail per essere informato sull'evoluzione dello spettro. <br>
+                Puoi richiedere la cancellazione in ogni momento scrivendo a admin@tryprism.it
+            </p>
+
+            <div id="waitlist-success" style="display:none; color: #10b981; font-size: 14px; margin-top: 15px; font-weight: 600;">
+                ✨ Il tuo posto nello spettro è stato riservato.
+            </div>
+        </div>
+    </header>
+
+    <section class="manifesto-section">
+        <div class="light-source"></div>
+        <p class="manifesto-text">
+            L’essenza è una. Le frequenze sono infinite. <br>
+            Inserisci un <strong>unico punto luce</strong> — il tuo argomento — e guarda PRISM rifrangerlo in <strong>uno spettro di voci editoriali distinte</strong>, tutte indissolubilmente ancorate alla stessa sorgente di verità.
+        </p>
+    </section>
+
+    <main class="main-content">
+        <section class="section">
+            <div class="item">
+                <h2>Oltre il concetto di Prompt</h2>
+                <p>Comprendiamo l'architettura del tuo pensiero per distribuirlo con precisione chirurgica attraverso un <strong>motore editoriale AI</strong> evoluto.</p>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="grid">
+                <article class="item">
+                    <h2>Market Intelligence</h2>
+                    <p>Ogni rifrazione è ancorata a una verità documentata, validando fonti in tempo reale per contenuti sempre autorevoli.</p>
+                </article>
+                
+                <article class="item">
+                    <h2>Multi-Tone Spectrum</h2>
+                    <p>La tua voce declinata in ogni sfumatura, ottimizzata per le dinamiche organiche di ogni piattaforma professionale.</p>
+                </article>
+                
+                <article class="item">
+                    <h2>Editorial Workflow</h2>
+                    <p>Output strutturati e pronti alla pubblicazione, eliminando ogni frizione tra l'idea e la tua <strong>content strategy</strong>.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section" style="border-top: 1px solid rgba(255,255,255,0.05);">
+            <h3 style="font-weight: 300; font-size: 24px; color: #444; font-style: italic; max-width: 800px; margin: auto;">
+                "Il futuro della comunicazione non è produrre più contenuti, ma rifrangere meglio il significato."
+            </h3>
+        </section>
+    </main>
+
+    <footer>
+        <p>PRISM AI | PROFESSIONAL EDITORIAL ENGINE</p>
+        <p>© 2026 – TUTTI I DIRITTI RISERVATI. IL FUTURO È UNO SPETTRO IN COSTRUZIONE.</p>
+        <!-- INFO PRIVACY E ANALYTICS AGGIUNTE -->
+        <p style="opacity: 0.5; font-size: 9px; margin-top: 20px; text-transform: none; letter-spacing: 0.5px;">
+            Questo sito utilizza strumenti di analisi statistica anonima per migliorare l'esperienza utente. <br>
+            Per richiedere la cancellazione dei propri dati dalla waitlist, scrivi a: <strong>admin@tryprism.it</strong>
+        </p>
+    </footer>
+
+</body>
+</html>
