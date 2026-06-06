@@ -20,13 +20,13 @@ function initFirebaseConfig(currentEnv) {
 
     // 🚀 CONFIGURAZIONE: PRODUZIONE
     const configProd = {
-        apiKey: "AIzaSyProdABC_INSERISCI_CHIAVE_DI_PRODUZIONE",
-        authDomain: "prism-prod.firebaseapp.com",
-        projectId: "prism-prod",
-        storageBucket: "prism-prod.appspot.com",
-        messagingSenderId: "222222222222",
-        appId: "1:222222222222:web:prod123456",
-        backendUrl: "https://api.iltuodominio.com"
+        apiKey: "AIzaSyDLVgzB3w_K5XWeh9UUu4zMcZ1kF3ZLlLE",
+        authDomain: "prism-production-9fc2d.firebaseapp.com",
+        projectId: "prism-production-9fc2d",
+        storageBucket: "prism-production-9fc2d.firebasestorage.app",
+        messagingSenderId: "91708503866",
+        appId: "1:91708503866:web:ed6f75d48390aa67d58203",
+        measurementId: "G-BDBR0P714S"
     };
 
     // 🟢 FALLBACK INTELLIGENTE: Se currentEnv non viene passato o è invalido, lo rileva dall'URL
