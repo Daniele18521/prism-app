@@ -19,9 +19,6 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            display: none !important; /* Nasconde tutto finché non toglierai il redirect sopra */
-        }
-        /* body {
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Inter', -apple-system, sans-serif;
@@ -30,9 +27,9 @@
             align-items: center;
             justify-content: center;
             padding: 20px;
-        } */
+        } 
 
-        /* --- CARD DI LOGIN INTEGRATA NEL DESIGN SYSTEM --- */
+        /* --- CARD DI LOGIN SEMPLIFICATA PER IL SINGLE SIGN-ON --- */
         .login-card {
             background: rgba(255, 255, 255, 0.01);
             border: 1px solid var(--border-grey);
@@ -41,6 +38,7 @@
             width: 100%;
             max-width: 420px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            text-align: center;
         }
 
         .logo-area {
@@ -56,73 +54,41 @@
         }
 
         .auth-subtitle {
-            text-align: center;
             font-size: 13px;
             color: var(--text-dim);
             margin-top: -15px;
-            margin-bottom: 30px;
-            line-height: 1.5;
+            margin-bottom: 35px;
+            line-height: 1.6;
         }
 
-        /* --- CAMPI DI INPUT RILEVATI DA WORKSPACE --- */
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: var(--text-dim);
-            margin-bottom: 8px;
-            letter-spacing: 0.5px;
-        }
-
-        .input-wrapper {
-            position: relative;
-            background: var(--input-bg);
+        /* --- PULSANTE ACCESSO GOOGLE PREMIUM --- */
+        .google-btn {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-main);
             border: 1px solid var(--border-grey);
-            border-radius: 8px;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-        }
-
-        .input-wrapper i {
-            position: absolute;
-            left: 15px;
-            color: var(--text-dim);
-            font-size: 18px; /* <--- Icone ingrandite da 14px a 18px */
-        }
-
-        .input-wrapper input {
-            width: 100%;
-            background: transparent;
-            border: none;
-            color: #fff;
-            padding: 14px 15px 14px 46px; /* <--- Aumentato a 46px per non sovrapporsi alle icone grandi */
-            font-size: 14px;
-            outline: none;
-        }
-
-        /* --- PULSANTE GENERA STYLE --- */
-        .submit-btn {
-            width: 100%;
-            background: var(--accent-blue);
-            color: #fff;
-            border: none;
-            padding: 14px;
+            padding: 16px;
             border-radius: 8px;
             font-weight: 700;
             font-size: 13px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            transition: background 0.2s, opacity 0.2s;
+            transition: background 0.2s, border-color 0.2s, opacity 0.2s;
             margin-top: 10px;
         }
-        .submit-btn:hover { background: #1d4ed8; }
+        .google-btn:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: var(--text-main);
+        }
+        .google-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
         /* --- ALERT BOX INTERNO --- */
         .alert-box {
@@ -130,30 +96,22 @@
             padding: 12px;
             border-radius: 6px;
             font-size: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
             line-height: 1.4;
+            text-align: left;
         }
         .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; }
         .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #34d399; }
 
-        /* --- SWITCH FOOTER --- */
-        .switch-footer {
-            margin-top: 25px;
+        /* --- FOOTER INFORMATIVO SULLA CONFIGURAZIONE --- */
+        .info-footer {
+            margin-top: 35px;
             padding-top: 20px;
-            border-t: 1px solid var(--border-grey);
-            text-align: center;
-            font-size: 12px;
+            border-top: 1px solid var(--border-grey);
+            font-size: 11px;
             color: var(--text-dim);
+            line-height: 1.5;
         }
-
-        .switch-link {
-            color: var(--accent-blue);
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            margin-left: 5px;
-        }
-        .switch-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -163,35 +121,17 @@
             <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo" class="logo-img">
         </div>
         
-        <p class="auth-subtitle" id="auth-subtitle">Inserisci le credenziali operative del tuo Cluster.</p>
+        <p class="auth-subtitle">Accedi o inizializza il tuo spazio di lavoro professionale tramite autenticazione sicura Google.</p>
 
         <div id="alert-box" class="alert-box"></div>
 
-        <form id="auth-form" onsubmit="handleAuthSubmit(event)">
-            <div class="form-group">
-                <label class="form-label">Indirizzo Email</label>
-                <div class="input-wrapper">
-                    <i class="fas fa-envelope"></i>
-                    <input type="email" id="email" required placeholder="nome@company.it">
-                </div>
-            </div>
+        <!-- Unico punto di accesso del sistema: login e onboarding automatico integrati -->
+        <button type="button" id="google-auth-btn" onclick="handleGoogleAuth()" class="google-btn">
+            <i class="fab fa-google"></i> Continua con Google
+        </button>
 
-            <div class="form-group">
-                <label class="form-label">Chiave d'Accesso</label>
-                <div class="input-wrapper">
-                    <i class="fas fa-lock"></i>
-                    <input type="password" id="password" required placeholder="••••••••">
-                </div>
-            </div>
-
-            <button type="submit" id="submit-btn" class="submit-btn">
-                Accedi al Sistema
-            </button>
-        </form>
-
-        <div class="switch-footer">
-            <span id="switch-text">Sei un professionista autonomo?</span>
-            <span onclick="toggleAuthMode()" id="switch-btn" class="switch-link">Registrati</span>
+        <div class="info-footer">
+            Selezionando Google, PRISM configurerà automaticamente un ambiente dedicato (fino a 10 analisi e 5 rigenerazioni incluse).
         </div>
     </div>
 
@@ -201,116 +141,123 @@
 
     <script src="/firebase-config.js"></script>
     <script>
-        //Da decommentare
-        window.location.href = "/";
+        // Inizializziamo la configurazione client-side di Firebase passando la variabile d'ambiente
         initFirebaseConfig("<%= env %>");
     </script>
 
     <script>
-        let isLoginMode = true;
-
+        // Registriamo un ascoltatore per eseguire la logica non appena il DOM è completamente pronto
         window.addEventListener('DOMContentLoaded', () => {
+            // Estraiamo i parametri analizzando la query string dell'URL corrente
             const urlParams = new URLSearchParams(window.location.search);
+            // Se l'URL riporta un errore dovuto a un profilo non trovato su Firestore
             if (urlParams.get('error') === 'profile_not_found') {
+                // Invochiamo l'helper per mostrare la notifica d'errore all'utente
                 showAlert("error", "Profilo non registrato su Firestore.");
+            // Se invece l'URL riporta l'assenza di una Company associata all'utenza
             } else if (urlParams.get('error') === 'no_company_assigned') {
+                // Mostriamo il messaggio di errore per informare della mancata associazione aziendale
                 showAlert("error", "Nessun cluster aziendale associato a questa utenza.");
             }
         });
 
+        /**
+         * Mostra un avviso all'utente impostando il colore e la formattazione corretta del box.
+         * @param {string} type - Tipo di alert ('error' oppure 'success').
+         * @param {string} message - Il messaggio testuale da inserire nel box.
+         */
         function showAlert(type, message) {
+            // Recuperiamo il riferimento all'elemento HTML adibito a contenitore degli avvisi
             const box = document.getElementById('alert-box');
+            // Aggiorniamo il contenuto testuale inserendo il messaggio di notifica
             box.innerText = message;
+            // Rendiamo visibile l'elemento modificandone la proprietà css display
             box.style.display = "block";
+            // Assegniamo le classi grafiche corrispondenti per applicare i colori di errore o successo
             box.className = `alert-box ${type === 'error' ? 'alert-error' : 'alert-success'}`;
         }
 
-        function toggleAuthMode() {
-            isLoginMode = !isLoginMode;
-            const subtitle = document.getElementById('auth-subtitle');
-            const submitBtn = document.getElementById('submit-btn');
-            const switchText = document.getElementById('switch-text');
-            const switchBtn = document.getElementById('switch-btn');
+        /**
+         * Gestisce l'intera procedura di autenticazione client-side con Google Provider.
+         * Effettua in modo trasparente l'onboarding (scrittura Batch) se l'utente non esiste a database.
+         */
+        async function handleGoogleAuth() {
+            // Recuperiamo il riferimento al pulsante di autenticazione per poterne controllare lo stato
+            const btn = document.getElementById('google-auth-btn');
+            // Disabilitiamo il pulsante per prevenire clic ripetuti accidentali durante la transazione
+            btn.disabled = true;
+            // Inizializziamo l'istanza del provider Google per Firebase Authentication
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try {
+                // Apriamo la finestra popup nativa per completare l'autenticazione con Google
+                const result = await firebase.auth().signInWithPopup(provider);
+                // Estraiamo i dati dell'utente autenticato dal record restituito da Firebase
+                const user = result.user;
 
-            if (isLoginMode) {
-                subtitle.innerText = "Inserisci le credenziali operative del tuo Cluster.";
-                submitBtn.innerText = "Accedi al Sistema";
-                switchText.innerText = "Sei un professionista autonomo?";
-                switchBtn.innerText = "Registrati";
-            } else {
-                subtitle.innerText = "Inizializza un ambiente autonomo di calcolo e archivio.";
-                submitBtn.innerText = "Crea Spazio Lavoro";
-                switchText.innerText = "Hai già delle credenziali?";
-                switchBtn.innerText = "Accedi";
+                // Prepariamo la query leggendo il documento dell'utente all'interno della raccolta 'users'
+                const userRef = window.db.collection("users").doc(user.uid);
+                // Effettuiamo la chiamata di lettura su Firestore per recuperare lo snapshot del profilo
+                const userDoc = await userRef.get();
+
+                // Se l'utente non è censito nel database (nuovo iscritto), avviamo l'onboarding
+                if (!userDoc.exists) {
+                    // Generiamo l'ID Company univoco basandoci sul formato camelCase concordato
+                    const generatedCompanyId = `company_${user.uid}`;
+                    // Avviamo un'operazione batch per garantire l'atomicità della doppia scrittura
+                    const batch = window.db.batch();
+
+                    // Definiamo il riferimento per la creazione del documento Company associato
+                    const companyRef = window.db.collection("companies").doc(generatedCompanyId);
+                    // Prepariamo la scrittura dei dati aziendali con i parametri del piano Free
+                    batch.set(companyRef, {
+                        name: `Workspace - ${user.email}`,       // Nome provvisorio del workspace aziendale
+                        stripeCustomerId: null,                   // ID cliente Stripe (inizialmente nullo)
+                        stripeSubscriptionId: null,               // ID abbonamento Stripe (inizialmente nullo)
+                        subscriptionStatus: "free",               // Impostiamo lo stato iniziale
+                        tier: "free",                             // Definiamo il livello di servizio iniziale
+                        enabled_tones: [                          // Abilitiamo l'array dei toni base gratuiti
+                            "umano", 
+                            "gioviale",
+                            "risolutore",
+                            "futurista",
+                            "equilibrato",
+                            "polemico",
+                        ],
+                        generations_left: 10,                     // Impostiamo il limite iniziale di 50 analisi
+                        regenerations_left: 5,                  // Impostiamo il limite iniziale di 100 rigenerazioni
+                        created_at: firebase.firestore.FieldValue.serverTimestamp(), // Timestamp di creazione
+                        updated_at: firebase.firestore.FieldValue.serverTimestamp()  // Timestamp di aggiornamento
+                    });
+
+                    // Prepariamo la scrittura del profilo utente agganciato alla nuova Company
+                    batch.set(userRef, {
+                        email: user.email,                        // Indirizzo email ufficiale ricavato da Google
+                        companyId: generatedCompanyId,            // Riferimento chiave esterna (camelCase)
+                        user_guide: true,                         // Impostiamo il flag per la guida utente
+                        role: "owner",                            // Ruolo amministrativo impostato a Owner
+                        user_profile: "admin",                    // Profilo operativo impostato ad Admin
+                        custom_enabled_tones: null,               // Nessun override personalizzato sui toni
+                        created_at: firebase.firestore.FieldValue.serverTimestamp(), // Timestamp di creazione
+                        updated_at: firebase.firestore.FieldValue.serverTimestamp()  // Timestamp di aggiornamento
+                    });
+
+                    // Eseguiamo il commit del batch scrivendo contemporaneamente entrambi i documenti
+                    await batch.commit();
+                }
+
+                // Memorizziamo in modo sicuro l'UID dell'utente autenticato nella sessione del browser
+                sessionStorage.setItem("prism_user_uid", user.uid);
+                // Informiamo l'utente dell'avvenuto completamento della sessione
+                showAlert("success", "Accesso con Google eseguito! Reindirizzamento...");
+                // Effettuiamo il redirect verso la Dashboard operativa di PRISM dopo un breve delay visivo
+                setTimeout(() => { window.location.href = "/dashboard"; }, 800);
+            } catch (error) {
+                // Intercettiamo eventuali eccezioni ripristinando lo stato del pulsante
+                btn.disabled = false;
+                // Mostriamo la notifica con l'errore descrittivo generato durante il login
+                showAlert("error", `Errore Google Sign-In: ${error.message}`);
             }
         }
-
-        async function handleAuthSubmit(event) {
-    event.preventDefault();
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const btn = document.getElementById('submit-btn');
-
-    btn.disabled = true;
-    btn.style.opacity = "0.5";
-
-    if (isLoginMode) {
-        try {
-            // 🟢 1. Eseguiamo l'autenticazione su Firebase
-            const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-
-            // 🟢 2. SALVATAGGIO DI SICUREZZA: Scriviamo l'UID reale nella sessione del browser
-            // Questo azzera i problemi di asincronia al caricamento della Dashboard
-            sessionStorage.setItem("prism_user_uid", user.uid);
-
-            showAlert("success", "Autenticazione eseguita. Accesso...");
-            setTimeout(() => { window.location.href = "/dashboard"; }, 800);
-        } catch (error) {
-            showAlert("error", "Credenziali non valide.");
-            btn.disabled = false;
-            btn.style.opacity = "1";
-        }
-    } else {
-        try {
-            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            const generatedCompanyId = `company_${user.uid}`;
-
-            const batch = window.db.batch();
-
-            // Creazione Company Speculare per Singolo
-            const companyRef = window.db.collection("companies").doc(generatedCompanyId);
-            batch.set(companyRef, {
-                name: `Privato (${email.split('@')[0]})`,
-                is_corporate: false,
-                created_at: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            // Creazione Utente
-            const userRef = window.db.collection("users").doc(user.uid);
-            batch.set(userRef, {
-                company_id: generatedCompanyId,
-                role: "owner",
-                email: email,
-                created_at: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            await batch.commit();
-
-            // 🟢 Salviamo l'UID anche in fase di registrazione autonoma
-            sessionStorage.setItem("prism_user_uid", user.uid);
-
-            showAlert("success", "Ambiente configurato! Configurazione in corso...");
-            setTimeout(() => { window.location.href = "/dashboard"; }, 1000);
-
-        } catch (error) {
-            showAlert("error", `Errore: ${error.message}`);
-            btn.disabled = false;
-            btn.style.opacity = "1";
-        }
-    }
-}
     </script>
 </body>
 </html>

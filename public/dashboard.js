@@ -1,8 +1,66 @@
 /**
  * SERVER API PRISM - DASHBOARD ORCHESTRATOR
- * Versione: 2.1 (Analisi Preventiva + Generazione On-Demand con Error Handling avanzato)
- * Scopo: Gestisce il flusso asincrono tra Shaper/Refiner e la generazione dei singoli toni.
+ * Versione: 3.4 (Workspace Integration & Global Error Logging)
+ * Scopo: Gestisce il flusso asincrono usando gli slug semantici di Firestore, aggiorna i crediti in real-time e gestisce gli strumenti del Workspace.
  */
+
+// ==========================================
+// 0. GLOBAL ERROR LOGGING (PRODUZIONE)
+// ==========================================
+
+(function initGlobalErrorLogging() {
+    const errorBanner = document.getElementById('global-error-notification');
+    let catastrophicShown = false;
+
+    function logError(context, detail) {
+        console.error(`[PRISM ${context}]`, detail);
+    }
+
+    function showCatastrophicNotification(message) {
+        if (!errorBanner || catastrophicShown) return;
+        catastrophicShown = true;
+        errorBanner.textContent = message || 'Si è verificato un errore critico. Ricarica la pagina o riprova.';
+        errorBanner.style.display = 'block';
+    }
+
+    window.onerror = function(message, source, lineno, colno, error) {
+        logError('RUNTIME', { message, source, lineno, colno, stack: error?.stack });
+        showCatastrophicNotification('Errore di runtime rilevato. L\'applicazione potrebbe non funzionare correttamente.');
+        return false;
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+        const reason = event.reason;
+        logError('UNHANDLED_REJECTION', reason instanceof Error ? reason.message : reason);
+        showCatastrophicNotification('Errore asincrono non gestito. Controlla la connessione e riprova.');
+    });
+
+    window.addEventListener('offline', function() {
+        logError('OFFLINE', 'Client offline');
+        showCatastrophicNotification('Connessione persa. Verifica la rete e riprova.');
+    });
+
+    window.addEventListener('online', function() {
+        if (errorBanner && catastrophicShown) {
+            errorBanner.style.display = 'none';
+            catastrophicShown = false;
+        }
+    });
+
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async function(...args) {
+        try {
+            const response = await nativeFetch(...args);
+            if (!response.ok) {
+                logError('FETCH', { url: args[0], status: response.status, statusText: response.statusText });
+            }
+            return response;
+        } catch (err) {
+            logError('FETCH', { url: args[0], error: err.message });
+            throw err;
+        }
+    };
+})();
 
 // ==========================================
 // 1. CONFIGURAZIONE STATO E VARIABILI GLOBALI
@@ -10,30 +68,45 @@
 
 const topicInputTextarea = document.getElementById('topicInput');
 const charCounterDisplay = document.getElementById('charCounter');
+const btnGenerate = document.querySelector('.generate-btn');
+const btnReset = document.querySelector('.reset-btn');
+const settingsRow = document.querySelector('.settings-row');
 const maxCharacterLength = 200;
+const MIN_WORDS_FOR_ANALYZE = 5;
 
-// Cache per i testi generati divisi per tono (es: { polemico: { text: "..." } })
+function countInputWords(text) {
+    const trimmed = (text || '').trim();
+    return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+}
+
 let globalCacheTones = {};
-
-// Cache per asset multimediali e fonti (condivisi tra i toni dello stesso job)
-let globalCacheMedia = { 
-    verifiedImages: [], 
-    verifiedTables: [],
-    sourcesPreview: [] 
-}; 
-
-// Riferimento per l'intervallo di polling (necessario per poterlo fermare globalmente)
+let globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] }; 
 let pollInterval = null;
+let tonePollInterval = null;
+let companyUnsubscribe = null; // Memorizza la funzione di rimozione dell'ascolto real-time di Firestore
+let activeTypewriterTimeout = null; // Memorizza il timeout attivo per l'effetto macchina da scrivere
 
-// Sessione utente sincronizzata via Firestore
-let currentUserSessionData = { userId: null, companyId: null, role: null };
+let currentUserSessionData = { 
+    userId: null, 
+    companyId: null, 
+    role: null,
+    companyDetails: null 
+};
 
-// Tono correntemente visualizzato o in fase di generazione
 let currentActiveToneKey = null;
+let analysisCompleted = false;
+let hasDeductedCreditForJob = false;
+let toneGenHasSeenGenerating = false;
+let toneGenRevealStarted = false;
+let dashboardPlatformLocked = false;
+let userGuideActive = false;
+let userGuideCurrentPhase = 0;
+let userGuideAwaitingPhase5 = false;
+let userGuideHighlightedEl = null;
+let userGuideTextareaEl = null;
+let userGuideInteractiveEls = [];
+let userGuidePositionHandler = null;
 
-/**
- * Risoluzione dinamica dell'URL del backend in base all'ambiente
- */
 function getBackendUrl() {
     if (window.FIREBASE_ENV && window.FIREBASE_ENV.backendUrl) {
         return window.FIREBASE_ENV.backendUrl;
@@ -42,7 +115,7 @@ function getBackendUrl() {
 }
 
 // ==========================================
-// 2. GESTIONE AUTENTICAZIONE E SESSIONE
+// 2. GESTIONE AUTENTICAZIONE E SYNC FIRESTORE
 // ==========================================
 
 firebase.auth().onAuthStateChanged(async (user) => {
@@ -53,99 +126,635 @@ firebase.auth().onAuthStateChanged(async (user) => {
         try {
             const userDoc = await window.db.collection("users").doc(finalUid).get();
             if (userDoc.exists) {
-                const data = userDoc.data();
-                currentUserSessionData = {
-                    userId: finalUid,
-                    companyId: data.company_id, 
-                    role: data.role || "member"
-                };
+                const userData = userDoc.data();
+                const companyId = userData.companyId;
+                userGuideActive = userData.user_guide === true;
+
+                // Scollega eventuali listener attivi precedentemente
+                if (companyUnsubscribe) {
+                    companyUnsubscribe();
+                }
+
+                // Sottoscrizione in tempo reale al documento dell'azienda associata
+                companyUnsubscribe = window.db.collection("companies").doc(companyId).onSnapshot((companyDoc) => {
+                    if (companyDoc.exists) {
+                        const companyData = companyDoc.data();
+                        
+                        currentUserSessionData = {
+                            userId: finalUid,
+                            companyId: companyId, 
+                            role: userData.role || "member",
+                            companyDetails: companyData
+                        };
+
+                        console.log("✅ PRISM Auth: Sincronizzazione slug per", companyData.name);
+                        
+                        // Applica restrizioni basate sugli slug nell'array enabled_tones
+                        applyPlanHardLocks(companyData.enabled_tones || []);
+
+                        // Recupero e aggiornamento dei contatori dei crediti nel footer
+                        const generationsLeft = companyData.generations_left;
+                        const regenerationsLeft = companyData.regenerations_left;
+                        updateCreditsUI(generationsLeft, regenerationsLeft);
+                    }
+                }, (error) => {
+                    console.error("❌ [CREDITS] Errore sincronizzazione real-time azienda:", error.message);
+                });
+
+                if (userGuideActive) {
+                    setTimeout(() => initUserGuide(), 700);
+                }
+
             }
         } catch (err) {
-            console.error("❌ [AUTH] Errore fetch profilo:", err.message);
+            console.error("❌ [AUTH] Errore sincronizzazione:", err.message);
         }
     } else {
         window.location.href = "login.html";
     }
 });
 
+/**
+ * Aggiorna gli elementi UI dei crediti rimanenti applicando il colore rosso di alert sotto le soglie critiche.
+ * Soglie: <= 5 per le generazioni, <= 10 per le rigenerazioni.
+ */
+function updateCreditsUI(generationsLeft, regenerationsLeft) {
+    const genBox = document.getElementById("credits-generations");
+    const regenBox = document.getElementById("credits-regenerations");
+
+    if (genBox) {
+        const val = (generationsLeft !== undefined && generationsLeft !== null) ? generationsLeft : 0;
+        genBox.innerText = val;
+
+        // Se il contatore arriva a 5 o meno generazioni, diventa rosso
+        if (val <= 5) {
+            genBox.classList.add("low-credits");
+        } else {
+            genBox.classList.remove("low-credits");
+        }
+    }
+
+    if (regenBox) {
+        const val = (regenerationsLeft !== undefined && regenerationsLeft !== null) ? regenerationsLeft : 0;
+        regenBox.innerText = val;
+
+        // Se il contatore arriva a 10 o meno rigenerazioni, diventa rosso
+        if (val <= 10) {
+            regenBox.classList.add("low-credits");
+        } else {
+            regenBox.classList.remove("low-credits");
+        }
+    }
+}
+
+/**
+ * Scala di 1 il campo companies/{companyId}.generations_left (solo analisi completata con successo).
+ * L'onSnapshot sul documento company aggiorna anche l'UI; qui si forza un refresh immediato post-transazione.
+ */
+async function deductGenerationCredit(companyId) {
+    if (!companyId || !window.db) {
+        console.error("❌ [CREDITS] companyId o Firestore non disponibili");
+        return false;
+    }
+
+    try {
+        const companyRef = window.db.collection("companies").doc(companyId);
+        let newGenerationsLeft = null;
+
+        await window.db.runTransaction(async (transaction) => {
+            const companyDoc = await transaction.get(companyRef);
+            if (!companyDoc.exists) throw new Error("Documento azienda non trovato");
+
+            const current = companyDoc.data().generations_left;
+            if (current === undefined || current === null || current <= 0) {
+                throw new Error("Crediti generazioni esauriti");
+            }
+
+            newGenerationsLeft = current - 1;
+
+            transaction.update(companyRef, {
+                generations_left: newGenerationsLeft,
+                updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        });
+
+        if (currentUserSessionData.companyId === companyId && currentUserSessionData.companyDetails) {
+            currentUserSessionData.companyDetails.generations_left = newGenerationsLeft;
+        }
+        updateCreditsUI(newGenerationsLeft, currentUserSessionData.companyDetails?.regenerations_left);
+
+        console.log("✅ [CREDITS] companies/" + companyId + " → generations_left:", newGenerationsLeft);
+        return true;
+    } catch (err) {
+        console.error("❌ [CREDITS] Errore scalatura generations_left:", err.message);
+        return false;
+    }
+}
+
+/**
+ * Gestisce i lucchetti confrontando lo slug della card con enabled_tones
+ */
+function applyPlanHardLocks(enabledSlugs) {
+    document.querySelectorAll('.tone-card').forEach(card => {
+        const slug = card.getAttribute('data-key'); // Ora data-key contiene lo slug esatto (es. 'polemico')
+        
+        if (card && !enabledSlugs.includes(slug)) {
+            card.classList.add('locked-by-plan');
+            card.onclick = null; 
+            if (!card.querySelector('.lock-badge')) {
+                const lock = document.createElement('i');
+                lock.className = 'fas fa-lock lock-badge';
+                card.appendChild(lock);
+            }
+        }
+    });
+}
+
 function getCurrentUserData() {
     return currentUserSessionData.userId ? currentUserSessionData : { userId: sessionStorage.getItem("prism_user_uid"), companyId: null };
 }
 
 // ==========================================
-// 3. LOGICA DI INTERFACCIA E CHECKLIST
+// 3. LOGICA DI INTERFACCIA E TRIGGER
 // ==========================================
 
-function updateCounter() {
-    if (!topicInputTextarea || !charCounterDisplay) return;
-    const currentLength = topicInputTextarea.value.length;
+function handleInputTrigger() {
+    if (!topicInputTextarea) return;
+    
+    const text = topicInputTextarea.value.trim();
+    const wordCount = countInputWords(text);
+    
+    const currentLength = text.length;
     const remaining = maxCharacterLength - currentLength;
     charCounterDisplay.textContent = `${remaining} / ${maxCharacterLength}`;
     charCounterDisplay.style.color = remaining <= 10 ? "#ef4444" : "var(--text-dim)";
+
+    const canGenerate = wordCount >= MIN_WORDS_FOR_ANALYZE && !analysisCompleted;
+
+    btnGenerate.disabled = !canGenerate;
+    btnGenerate.style.opacity = canGenerate ? "1" : "0.3";
+
+    if (wordCount >= MIN_WORDS_FOR_ANALYZE) {
+        btnReset.disabled = false;
+        btnReset.style.opacity = "1";
+    } else {
+        btnReset.disabled = true;
+        btnReset.style.opacity = "0.3";
+    }
+
+    if (userGuideActive && userGuideCurrentPhase === 1 && wordCount >= MIN_WORDS_FOR_ANALYZE) {
+        showUserGuidePhase(2);
+    }
 }
 
 if (topicInputTextarea) {
-    topicInputTextarea.addEventListener('input', updateCounter);
-    updateCounter();
+    topicInputTextarea.addEventListener('input', handleInputTrigger);
+    handleInputTrigger();
 }
 
 /**
- * Gestisce l'avanzamento visivo (Tick verdi) della checklist nel modal
+ * FUNZIONE PULISCI (Reset Profondo)
+ * Azione: Pulisce testo, cache, JobID e blocca la UI.
  */
-function updateChecklist(step) {
-    const stepsOrder = { 'query_shaping': 1, 'tavily_search': 2, 'compression': 3, 'generation': 4 };
-    const currentOrder = stepsOrder[step] || 0;
+window.fullReset = function() {
+    if (topicInputTextarea) {
+        // 1. Pulisce l'area di testo dell'argomento
+        topicInputTextarea.value = '';
 
+        // 2. Pulizia cache dati e riferimenti JobID in sessione
+        globalCacheTones = {};
+        analysisCompleted = false;
+        hasDeductedCreditForJob = false;
+        sessionStorage.removeItem('prism_last_job_id');
+        console.log("🧹 PRISM: Sessione JobID rimossa.");
+
+        // 3. Blocca tutte le card dei toni (rimuove lo stato 'enabled')
+        document.querySelectorAll('.tone-card').forEach(card => {
+            card.classList.remove('enabled');
+        });
+
+        // 4. Riporta le impostazioni Social/Lingua allo stato bloccato
+        if (settingsRow) {
+            settingsRow.style.pointerEvents = "none";
+            settingsRow.style.opacity = "0.5";
+        }
+        unlockDashboardPlatformSelection();
+
+        // 5. Aggiorna lo stato dei bottoni (torna a disabled)
+        handleInputTrigger();
+
+        console.log("✨ PRISM: Interfaccia e cache resettate.");
+    }
+};
+
+function updateChecklist(currentStep) {
+    const stepsOrder = { query_shaping: 1, tavily_search: 2, refiner: 3, done: 4 };
+    const currentOrder = stepsOrder[currentStep] || 0;
     const checklistItems = [
         { id: 'check-shaping', order: 1 },
         { id: 'check-search', order: 2 },
         { id: 'check-refiner', order: 3 }
     ];
-
     checklistItems.forEach(item => {
         const el = document.getElementById(item.id);
         if (!el) return;
-        if (currentOrder > item.order) {
-            el.innerHTML = "✅"; el.style.color = "#10b981";
+        if (currentOrder > item.order || currentStep === 'done') {
+            el.innerHTML = "✅";
+            el.style.color = "#10b981";
         } else if (currentOrder === item.order) {
-            el.innerHTML = "⏳"; el.style.color = "#3b82f6";
+            el.innerHTML = "⏳";
+            el.style.color = "#3b82f6";
         } else {
-            el.innerHTML = "⚪"; el.style.color = "#3f3f46";
+            el.innerHTML = "⚪";
+            el.style.color = "#3f3f46";
         }
     });
 }
 
-function getStepColor(step) {
-    const colors = { 'query_shaping': '#1e3a8a', 'tavily_search': '#064e3b', 'compression': '#713f12', 'generation': '#4c1d95', 'done': '#2563eb' };
-    return colors[step] || '#2563eb';
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPINNER 1 — ANALISI (F1→F3)
+// DOM: #prism-modal  >  #analysis-prism-loader  >  #analysis-status-msg
+// Polling: pollInterval (1s) — NON condividere con generazione tono
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Label testuali per ogni fase dell'analisi
+const ANALYSIS_STEP_LABELS = {
+    query_shaping: 'Shaping della query — preparazione dello spunto',
+    tavily_search: 'Ricerca fonti autorevoli in tempo reale',
+    refiner: 'Affinamento e compressione del research',
+    done: 'Analisi completata — pronti per la rifrazione!'
+};
+
+// Legge workerState.currentStep dal payload Redis (fallback su pipeline.step)
+function getAnalysisWorkerStep(jobData) {
+    const workerState = jobData?.workerState || {}; // oggetto stato worker BullMQ
+    return workerState.currentStep || jobData?.pipeline?.step || 'query_shaping'; // step corrente
 }
 
-// ==========================================
-// 4. GESTIONE ERRORI PIPELINE
-// ==========================================
-
-/**
- * Funzione centralizzata per terminare i caricamenti in caso di errore
- */
-function handlePipelineError(errorMessage) {
-    if (pollInterval) clearInterval(pollInterval);
-    
-    // Nasconde il modal di caricamento
-    document.getElementById('prism-modal').style.display = 'none';
-    
-    // Ripristina la visibilità della checklist per il prossimo uso
-    const checklist = document.querySelector('.checklist-container');
-    if (checklist) checklist.style.display = 'block';
-
-    // Riabilita il bottone principale
-    const btn = document.querySelector('.generate-btn');
-    if (btn) {
-        btn.disabled = false;
-        btn.style.opacity = "1";
+// Calcola progress 0.15 / 0.40 / 0.55-0.70 in base allo step running
+function resolveAnalysisRunningProgress(currentStep, rawProgress) {
+    if (currentStep === 'query_shaping') return 0.15; // F1 shaping
+    if (currentStep === 'tavily_search') return 0.40; // F2 ricerca
+    if (currentStep === 'refiner') { // F3 refiner
+        if (typeof rawProgress === 'number') return Math.min(0.70, Math.max(0.55, rawProgress)); // progress dinamico
+        return 0.625; // default refiner
     }
-    
-    console.error("🚨 [PRISM PIPELINE ERROR]:", errorMessage);
-    alert(`Attenzione: ${errorMessage}`);
+    if (currentStep === 'done') return 1.0; // completato
+    if (typeof rawProgress === 'number') return Math.min(1, Math.max(0, rawProgress)); // fallback numerico
+    return 0.15; // default iniziale
+}
+
+// Mappa jobData → { status, currentStep, progress, label } per lo spinner analisi
+function buildAnalysisPrismUI(jobData) {
+    const status = jobData?.status || 'pending'; // status job Redis
+    const workerState = jobData?.workerState || {}; // stato worker
+    const currentStep = getAnalysisWorkerStep(jobData); // step corrente
+    const rawProgress = workerState.progress ?? jobData?.pipeline?.progress; // progress grezzo
+
+    if (status === 'completed' || currentStep === 'done') { // analisi terminata
+        return { status, currentStep: 'done', progress: 1.0, label: ANALYSIS_STEP_LABELS.done };
+    }
+    if (status === 'pending') { // in coda
+        return { status, currentStep, progress: 0.0, label: 'In attesa di avvio analisi...' };
+    }
+    if (status === 'failed') { // errore pipeline
+        const progress = typeof rawProgress === 'number' ? rawProgress : resolveAnalysisRunningProgress(currentStep, rawProgress);
+        const label = workerState.message || jobData?.error?.message || 'Errore durante l\'analisi';
+        return { status, currentStep, progress, label };
+    }
+    const progress = resolveAnalysisRunningProgress(currentStep, rawProgress); // step running
+    const label = workerState.message || ANALYSIS_STEP_LABELS[currentStep] || ANALYSIS_STEP_LABELS.query_shaping;
+    return { status, currentStep, progress, label };
+}
+
+// true quando l'analisi F1-F3 è finita → dissolve spinner analisi
+function isAnalysisJobCompleted(jobData, ui) {
+    return jobData?.status === 'completed' || ui.currentStep === 'done';
+}
+
+// true quando l'analisi è fallita
+function isAnalysisJobFailed(jobData) {
+    return jobData?.status === 'failed';
+}
+
+// Apre overlay fullscreen analisi e resetta animazione prisma
+function openAnalysisPrismModal(message) {
+    const modal = document.getElementById('prism-modal'); // overlay bloccante analisi
+    const loader = document.getElementById('analysis-prism-loader'); // contenitore SVG prisma
+    if (loader) loader.classList.remove('dissolving'); // rimuove classe dissolvenza
+    updateAnalysisPrismUI(message || 'Preparazione analisi...', 0); // label + progress 0%
+    if (modal) modal.style.display = 'flex'; // mostra overlay
+}
+
+// Aggiorna testo fase e barra progress sotto il prisma analisi
+function updateAnalysisPrismUI(message, progress) {
+    const statusEl = document.getElementById('analysis-status-msg'); // label fase analisi
+    const progressFill = document.getElementById('analysis-progress-fill'); // barra rainbow
+    if (statusEl && message) statusEl.innerText = message; // scrive messaggio
+    if (progressFill && typeof progress === 'number') progressFill.style.width = `${Math.round(progress * 100)}%`; // aggiorna %
+}
+
+// Chiude overlay analisi; se dissolve=true applica fade-out al prisma
+function closeAnalysisPrismModal(dissolve, onComplete) {
+    const modal = document.getElementById('prism-modal'); // overlay analisi
+    const loader = document.getElementById('analysis-prism-loader'); // spinner analisi
+    const finish = () => { // callback chiusura definitiva
+        if (modal) modal.style.display = 'none'; // nasconde overlay
+        if (loader) loader.classList.remove('dissolving'); // reset animazione
+        updateAnalysisPrismUI('Preparazione analisi...', 0); // reset label
+        if (onComplete) onComplete(); // es. guida utente fase 4
+    };
+    if (!dissolve || !loader) { finish(); return; } // chiusura immediata senza fade
+    loader.classList.add('dissolving'); // avvia dissolvenza CSS
+    setTimeout(finish, 850); // attende fine transizione
+}
+
+// Errore pipeline analisi: chiude spinner e riabilita UI
+function handlePipelineError(errorMessage) {
+    if (pollInterval) clearInterval(pollInterval); // ferma polling analisi
+    closeAnalysisPrismModal(false); // chiude overlay senza dissolve
+    const checklist = document.querySelector('.checklist-container'); // checklist fasi
+    if (checklist) checklist.style.display = 'block'; // ripristina checklist
+    const btn = document.querySelector('.generate-btn'); // pulsante ANALIZZA
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; } // riabilita
+    console.error('🚨 [PRISM ERROR]:', errorMessage); // log errore
+    alert(`Attenzione: ${errorMessage}`); // alert utente
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPINNER 2 — GENERAZIONE TONO (F4)
+// DOM: #output-modal  >  #tone-gen-prism-loader  >  #tone-gen-status-msg
+// Polling: tonePollInterval (2s) — separato da pollInterval analisi
+// Completamento: status torna a "completed" DOPO aver visto "generating"
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Label testuali per le fasi F4
+const TONE_GEN_STEP_LABELS = {
+    generation: 'Generazione del contenuto — rifrazione del tono in corso...',
+    done: 'Rifrazione completata'
+};
+
+// Legge workerState.currentStep per F4 (fallback su pipeline.step)
+function getToneGenWorkerStep(jobData) {
+    const workerState = jobData?.workerState || {}; // stato worker
+    return workerState.currentStep || workerState.step || jobData?.pipeline?.step || 'generation'; // step F4
+}
+
+// Estrae l'oggetto tones dal payload job (più path possibili)
+function extractTonesFromJob(jobData) {
+    if (!jobData) return {}; // guard
+    if (jobData.tones && typeof jobData.tones === 'object') return jobData.tones; // root
+    if (jobData.testo?.tones) return jobData.testo.tones; // testo.tones
+    if (jobData.data?.tones) return jobData.data.tones; // data.tones
+    if (jobData.data?.testo?.tones) return jobData.data.testo.tones; // data.testo.tones
+    return {}; // non trovato
+}
+
+// Trova la voce tono nell'oggetto tones (match case-insensitive sulla chiave)
+function findToneEntry(tones, toneKey) {
+    if (!tones || !toneKey) return null; // guard
+    if (tones[toneKey]) return tones[toneKey]; // match esatto
+    const lower = toneKey.toLowerCase(); // chiave normalizzata
+    for (const key of Object.keys(tones)) { // scan chiavi
+        if (key.toLowerCase() === lower) return tones[key]; // match case-insensitive
+    }
+    return null; // non trovato
+}
+
+// Normalizza tones[toneKey].versions — array oppure oggetto Firebase { 0, 1, ... }
+function normalizeToneVersions(versions) {
+    if (!versions) return []; // nessuna versione
+    if (Array.isArray(versions)) return versions.filter(Boolean); // array nativo
+    if (typeof versions === 'object') { // mappa numerica Firebase
+        return Object.keys(versions)
+            .sort((a, b) => Number(a) - Number(b)) // ordine indice
+            .map((k) => versions[k]) // ogni versione
+            .filter(Boolean); // scarta null/undefined
+    }
+    return []; // formato non riconosciuto
+}
+
+// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
+function extractTextFromToneEntry(entry) {
+    if (!entry) return ''; // voce assente
+    if (typeof entry === 'string') return entry; // testo grezzo diretto
+    if (typeof entry.text === 'string' && entry.text) return entry.text; // .text legacy flat
+    if (typeof entry.content === 'string' && entry.content) return entry.content; // .content fallback
+    const versionList = normalizeToneVersions(entry.versions); // lista versioni
+    if (versionList.length === 0) return ''; // nessuna versione con testo
+    const latest = versionList.reduce((best, version) => { // ultima per createdAt
+        if (!best) return version; // prima versione
+        const bestTs = best.createdAt ? new Date(best.createdAt).getTime() : -1; // timestamp best
+        const curTs = version.createdAt ? new Date(version.createdAt).getTime() : -1; // timestamp corrente
+        return curTs >= bestTs ? version : best; // preferisci la più recente
+    }, null);
+    return latest?.text || latest?.content || ''; // testo ultima versione
+}
+
+// Testo tono dalla cache locale (stessa struttura versions)
+function getToneTextFromCache(toneKey) {
+    return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
+}
+
+// true se il tono è già in cache con testo leggibile
+function hasToneInCache(toneKey) {
+    return Boolean(getToneTextFromCache(toneKey).trim()); // testo non vuoto
+}
+
+// Estrae testo tono dal payload job Redis (per typewriter — NON blocca il dissolve)
+function getToneTextFromJob(jobData, toneKey) {
+    if (!jobData || !toneKey) return ''; // guard
+    const tones = extractTonesFromJob(jobData); // oggetto tones root
+    const entry = findToneEntry(tones, toneKey); // tones.umano
+    return extractTextFromToneEntry(entry); // versions[n].text
+}
+
+// Salva tones + media in cache locale dopo generazione F4
+function cacheToneGenerationResult(task) {
+    const tones = extractTonesFromJob(task); // tones dal job
+    globalCacheTones = { ...globalCacheTones, ...tones }; // merge cache toni
+    const assets = extractAllDatabaseAssets(task); // immagini + fonti
+    globalCacheMedia = {
+        verifiedImages: assets.images || [], // formato atteso da renderToneAssetsAndActions
+        verifiedTables: [],
+        sourcesPreview: assets.sources || []
+    };
+}
+
+// Mappa jobData → UI spinner generazione tono
+function buildToneGenPrismUI(jobData) {
+    const status = jobData?.status || 'generating'; // status job
+    const workerState = jobData?.workerState || {}; // worker state
+    const currentStep = getToneGenWorkerStep(jobData); // step corrente
+    const rawProgress = workerState.progress ?? jobData?.pipeline?.progress; // progress grezzo
+
+    if (status === 'failed') { // errore generazione
+        return {
+            phase: 'failed',
+            status,
+            currentStep,
+            progress: typeof rawProgress === 'number' ? rawProgress : 0,
+            label: workerState.message || jobData?.error?.message || 'Errore durante la generazione del tono'
+        };
+    }
+    if (status === 'generating') { // F4 in corso (0.90 → 0.95)
+        return {
+            phase: 'generation',
+            status,
+            currentStep,
+            progress: typeof rawProgress === 'number' ? rawProgress : 0.90,
+            label: workerState.message || TONE_GEN_STEP_LABELS.generation
+        };
+    }
+    if ((status === 'completed' || status === 'done') && toneGenHasSeenGenerating) { // F4 finita
+        return {
+            phase: 'done',
+            status,
+            currentStep: 'done',
+            progress: 1.0,
+            label: workerState.message || TONE_GEN_STEP_LABELS.done
+        };
+    }
+    return { // stato residuo pre-F4 (completed analisi) → mostra ancora generazione
+        phase: 'generation',
+        status: 'generating',
+        currentStep: 'generation',
+        progress: typeof rawProgress === 'number' ? rawProgress : 0.90,
+        label: workerState.message || TONE_GEN_STEP_LABELS.generation
+    };
+}
+
+// true quando F4 è completa: status "completed" dopo aver visto "generating"
+function isToneGenComplete(jobData) {
+    if (!toneGenHasSeenGenerating) return false; // ignora completed residuo dell'analisi
+    const status = jobData?.status || ''; // status corrente
+    return status === 'completed' || status === 'done'; // F4 terminata
+}
+
+// true quando generazione tono fallita
+function isToneGenFailed(jobData) {
+    return jobData?.status === 'failed';
+}
+
+// Mostra spinner generazione tono dentro #output-modal
+function openToneGenPrismLoader(message, progress) {
+    const loader = document.getElementById('tone-gen-prism-loader'); // spinner F4
+    if (!loader) return; // elemento mancante
+    loader.classList.remove('dissolving'); // reset dissolvenza
+    loader.style.display = 'flex'; // rende visibile il prisma
+    loader.style.opacity = ''; // rimuove opacity inline
+    loader.style.transform = ''; // rimuove transform inline
+    loader.style.filter = ''; // rimuove filter inline
+    loader.style.transition = ''; // rimuove transition inline
+    updateToneGenPrismUI(message || TONE_GEN_STEP_LABELS.generation, progress ?? 0.90); // label + barra
+}
+
+// Aggiorna label e progress bar spinner generazione tono
+function updateToneGenPrismUI(message, progress) {
+    const statusEl = document.getElementById('tone-gen-status-msg'); // testo fase F4
+    const progressFill = document.getElementById('tone-gen-progress-fill'); // barra rainbow F4
+    if (statusEl && message) statusEl.innerText = message; // scrive messaggio
+    if (progressFill && typeof progress === 'number') progressFill.style.width = `${Math.round(progress * 100)}%`; // aggiorna %
+}
+
+// Dissolve spinner generazione tono e chiama callback (es. typewriter)
+function dissolveToneGenPrism(callback) {
+    const loader = document.getElementById('tone-gen-prism-loader'); // spinner F4
+    if (!loader) { if (callback) callback(); return; } // fallback se DOM assente
+    const svgContainer = loader.querySelector('.prism-svg-container'); // wrapper animazione
+    const svg = loader.querySelector('.prism-svg'); // SVG prisma
+    if (svgContainer) svgContainer.style.animation = 'none'; // ferma float
+    if (svg) svg.style.animation = 'none'; // ferma rotazione
+    loader.style.opacity = ''; // pulisce inline per permettere transizione CSS
+    loader.style.transform = ''; // pulisce inline
+    loader.style.filter = ''; // pulisce inline
+    loader.classList.remove('dissolving'); // reset classe
+    void loader.offsetHeight; // forza reflow browser
+    loader.classList.add('dissolving'); // avvia dissolvenza CSS
+    setTimeout(() => { // dopo animazione
+        loader.style.display = 'none'; // nasconde spinner
+        loader.classList.remove('dissolving'); // reset classe
+        if (callback) callback(); // es. startToneContentReveal
+    }, 850); // durata transizione
+}
+
+// Nasconde spinner generazione senza animazione (errore o reset)
+function hideToneGenPrismLoader() {
+    const loader = document.getElementById('tone-gen-prism-loader'); // spinner F4
+    if (!loader) return; // elemento mancante
+    loader.classList.remove('dissolving'); // reset animazione
+    loader.style.display = 'none'; // nasconde
+}
+
+// Gestisce errore F4: ferma polling, chiude modale, reset spinner
+function handleToneGenerationError(message) {
+    if (tonePollInterval) clearInterval(tonePollInterval); // ferma polling F4
+    tonePollInterval = null; // reset handle
+    toneGenRevealStarted = false; // reset flag reveal
+    const modal = document.getElementById('output-modal'); // modale output
+    if (modal) modal.style.display = 'none'; // chiude modale
+    hideToneGenPrismLoader(); // nasconde prisma
+    console.error('🚨 [PRISM TONE ERROR]:', message); // log
+    alert(`Errore di generazione: ${message}`); // alert utente
+}
+
+// Tick singolo polling F4 — ritorna true se generazione completata
+async function pollToneGenerationOnce(toneKey, jobId, userId, backendUrl, modalBox, titleEl, textEl) {
+    if (toneGenRevealStarted) return true; // evita doppia esecuzione post-completed
+
+    const pr = await fetch(`${backendUrl}/jobs/status/${userId}/${jobId}`); // GET stato job
+    const ps = await pr.json(); // parse JSON
+    if (!ps.success) { handleToneGenerationError('Errore nel processo di generazione'); return true; } // stop
+
+    const task = ps.data; // payload job Redis
+    const status = task?.status || ''; // status corrente
+
+    if (status === 'generating') toneGenHasSeenGenerating = true; // F4 avviata: ignora completed residuo analisi
+
+    const ui = buildToneGenPrismUI(task); // calcola label + progress
+
+    if (isToneGenFailed(task)) { handleToneGenerationError(ui.label || task.error?.message || 'Errore durante la scrittura del tono'); return true; } // stop errore
+
+    updateToneGenPrismUI(ui.label, ui.progress); // aggiorna spinner
+
+    if (!isToneGenComplete(task)) return false; // continua polling finché status ≠ completed
+
+    toneGenRevealStarted = true; // blocca tick successivi
+    if (tonePollInterval) clearInterval(tonePollInterval); // ferma polling
+    tonePollInterval = null; // reset handle
+    updateToneGenPrismUI(TONE_GEN_STEP_LABELS.done, 1.0); // label finale 100%
+
+    cacheToneGenerationResult(task); // salva tones + media in cache
+
+    const fullText = getToneTextFromJob(task, toneKey) || getToneTextFromCache(toneKey); // versions[n].text
+    if (!fullText.trim()) console.warn('[PRISM F4] status completed ma testo non trovato — verifica tones[toneKey].versions[n].text'); // debug
+    const richHTMLContent = parseAndCleanContentForModal(fullText); // HTML con tag formattati
+
+    dissolveToneGenPrism(() => { // dissolve prisma F4 su status completed
+        startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, textEl); // scrittura progressiva
+    });
+    return true; // polling terminato
+}
+
+// Avvia typewriter del contenuto tono dopo dissolve prisma (logica premium originale)
+function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, textEl) {
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout); // ferma typewriter precedente
+    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`; // titolo modale finale
+
+    textEl.innerHTML = ''; // svuota area testo
+    const typewriterWrap = document.createElement('div'); // wrapper interno per typewriter
+    typewriterWrap.style.cssText = 'color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;'; // stile contenuto
+    textEl.appendChild(typewriterWrap); // monta wrapper in #modal-tone-text
+
+    typewriterHTML(typewriterWrap, richHTMLContent, 18, () => { // macchina da scrivere sul wrapper
+        if (modalBox) { // espande modale a fine scrittura
+            modalBox.style.width = '950px'; // larghezza contenuto + sidebar
+            modalBox.classList.add('completed-glow'); // glow perimetrale tono
+            modalBox.style.overflowY = 'auto'; // abilita scroll
+        }
+        renderToneAssetsAndActions(toneKey); // galleria media sotto il testo
+        triggerUserGuidePhase5IfNeeded(); // guida freemium fase 5
+    });
 }
 
 // ==========================================
@@ -154,29 +763,33 @@ function handlePipelineError(errorMessage) {
 
 window.generateHumanPost = async function() {
     const topic = topicInputTextarea.value.trim();
-    if (!topic) return alert("Inserisci un argomento!");
+    if (!topic) return;
     
     const btn = document.querySelector('.generate-btn');
-    const modal = document.getElementById('prism-modal');
-    const progressBar = document.getElementById('p-bar');
     const userData = getCurrentUserData();
     const BACKEND_URL = getBackendUrl();
 
     if (!userData.companyId) return alert("Sincronizzazione profilo in corso...");
 
-    // Reset UI e Cache locale
+    const generationsLeft = currentUserSessionData.companyDetails?.generations_left;
+    if (generationsLeft !== undefined && generationsLeft !== null && generationsLeft <= 0) {
+        return alert("Crediti generazioni esauriti. Contatta l'amministratore o effettua l'upgrade del piano.");
+    }
+
     globalCacheTones = {};
-    globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] }; 
-    modal.style.display = 'flex';
-    progressBar.style.width = '0%';
-    document.getElementById('status-msg').innerText = "Innesco analisi Shaper/Refiner...";
+    globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] };
+    hasDeductedCreditForJob = false;
+    openAnalysisPrismModal('In attesa di avvio analisi...');
     
-    // Reset checklist visiva
     ['check-shaping', 'check-search', 'check-refiner'].forEach(id => { 
         if(document.getElementById(id)) document.getElementById(id).innerHTML = "⚪"; 
     });
 
     btn.disabled = true; btn.style.opacity = "0.5";
+
+    if (userGuideActive && userGuideCurrentPhase === 2) {
+        hideUserGuide();
+    }
 
     try {
         const response = await fetch(`${BACKEND_URL}/api/prepare-shaping`, {
@@ -191,153 +804,285 @@ window.generateHumanPost = async function() {
         const jobId = initResult.jobId;
         sessionStorage.setItem('prism_last_job_id', jobId);
 
-        // Avvio Polling Fase 1
         pollInterval = setInterval(async () => {
             try {
                 const statusResp = await fetch(`${BACKEND_URL}/jobs/status/${userData.userId}/${jobId}`);
                 const res = await statusResp.json();
-                
                 if (!res.success) return handlePipelineError(res.error || "Errore di connessione");
 
-                const { status, pipeline, error } = res.data;
+                const jobData = res.data;
+                const ui = buildAnalysisPrismUI(jobData);
 
-                // Controllo Fallimento nel Worker
-                if (status === 'failed') {
-                    return handlePipelineError(error?.message || "Errore imprevisto durante l'analisi");
+                if (isAnalysisJobFailed(jobData)) {
+                    return handlePipelineError(jobData.error?.message || ui.label || "Errore durante l'analisi");
                 }
 
-                // Avanzamento Grafico
-                progressBar.style.width = `${(pipeline.progress * 100)}%`;
-                progressBar.style.backgroundColor = getStepColor(pipeline.step);
-                document.getElementById('status-msg').innerText = pipeline.message;
-                updateChecklist(pipeline.step);
+                updateAnalysisPrismUI(ui.label, ui.progress);
+                updateChecklist(ui.currentStep);
 
-                if (status === 'completed') {
+                if (isAnalysisJobCompleted(jobData, ui)) {
                     clearInterval(pollInterval);
-                    // Abilitazione Card Toni
-                    document.querySelectorAll('.tone-card').forEach(card => {
-                        card.classList.add('enabled');
-                    });
-                    setTimeout(() => { modal.style.display = 'none'; }, 800);
-                    btn.disabled = false; btn.style.opacity = "1";
-                }
-            } catch (pollErr) { 
-                console.warn("Polling error:", pollErr); 
-            }
-        }, 1000);
+                    updateAnalysisPrismUI(ANALYSIS_STEP_LABELS.done, 1.0);
+                    updateChecklist('done');
 
-    } catch (err) {
-        handlePipelineError(err.message);
-    }
+                    if (!hasDeductedCreditForJob) {
+                        const creditDeducted = await deductGenerationCredit(userData.companyId);
+                        if (creditDeducted) {
+                            hasDeductedCreditForJob = true;
+                        } else {
+                            console.warn("⚠️ [CREDITS] Analisi OK ma aggiornamento generations_left non riuscito");
+                        }
+                    }
+
+                    if (settingsRow) { settingsRow.style.pointerEvents = "auto"; settingsRow.style.opacity = "1"; }
+                    document.querySelectorAll('.tone-card').forEach(card => {
+                        if (!card.classList.contains('locked-by-plan')) card.classList.add('enabled');
+                    });
+                    closeAnalysisPrismModal(true, () => {
+                        if (userGuideActive) showUserGuidePhase(4);
+                    });
+                    analysisCompleted = true;
+                    btn.disabled = true;
+                    btn.style.opacity = "0.3";
+                }
+            } catch (pollErr) { console.warn("Polling error:", pollErr); }
+        }, 1000);
+    } catch (err) { handlePipelineError(err.message); }
 };
 
 // ==========================================
-// 6. FASE 2: GENERAZIONE TONO (ON CLICK CARD)
+// 6. FASE 2: GENERAZIONE TONO (F4) - CON FLUSSO PREMIUM E LOCK-SCROLL
 // ==========================================
 
-/**
- * Gestore del click sulla card del tono
- */
+const TONE_ACCENT_COLORS = {
+    polemico: '#3b82f6',
+    equilibrato: '#f59e0b',
+    umano: '#ef4444',
+    gioviale: '#a855f7',
+    risolutore: '#ec4899',
+    futurista: '#06b6d4'
+};
+
+function hexToRgba(hex, alpha) {
+    const normalized = hex.replace('#', '');
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function applyOutputModalToneTheme(toneKey) {
+    const modalBox = document.getElementById('output-modal-box');
+    if (!modalBox || !toneKey) return;
+
+    const card = document.querySelector(`.tone-card[data-key="${toneKey}"]`);
+    let color = TONE_ACCENT_COLORS[toneKey] || '#a855f7';
+    if (card) {
+        const fromCard = getComputedStyle(card).getPropertyValue('--card-color').trim();
+        if (fromCard) color = fromCard;
+    }
+
+    modalBox.style.setProperty('--tone-accent', color);
+    modalBox.style.setProperty('--tone-border', hexToRgba(color, 0.62));
+    modalBox.style.setProperty('--tone-glow-1', hexToRgba(color, 0.28));
+    modalBox.style.setProperty('--tone-glow-2', hexToRgba(color, 0.14));
+    modalBox.dataset.toneKey = toneKey;
+}
+
 window.selectToneCard = async function(toneKey) {
+    const card = document.querySelector(`[data-key="${toneKey}"]`);
+    if (!card || !card.classList.contains('enabled')) return;
+
+    if (userGuideActive && userGuideCurrentPhase === 4) {
+        hideUserGuide();
+        userGuideAwaitingPhase5 = true;
+    }
+
     const jobId = sessionStorage.getItem('prism_last_job_id');
-    if (!jobId) return alert("Avvia prima l'analisi dell'argomento.");
+    if (!jobId) return alert("Avvia prima l'analisi.");
 
     currentActiveToneKey = toneKey;
 
-    // 1. Verifica Cache locale (già scaricato in questa sessione)
-    if (globalCacheTones && globalCacheTones[toneKey]?.text) {
+    // Recupero della piattaforma selezionata per la ricerca
+    const platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
+    
+    // Logica di ricerca preventiva su Firestore (Mock/Traccia vuota)
+    let existingToneFromFirestore = null; 
+
+    // Se il tono è stato trovato su Firestore, apri direttamente il popup finale
+    if (existingToneFromFirestore) {
+        globalCacheTones[toneKey] = existingToneFromFirestore;
         return window.openToneModal(toneKey);
     }
 
-    // 2. Verifica Firestore (scarica se presente nel database)
-    try {
-        const doc = await window.db.collection("contents").doc(String(jobId)).get();
-        if (doc.exists) {
-            const data = doc.data();
-            const tones = data.testo?.tones;
-            if (tones && tones[toneKey]?.text) {
-                globalCacheTones = tones;
-                const assets = extractAllDatabaseAssets(data);
-                globalCacheMedia = assets;
-                return window.openToneModal(toneKey);
-            }
-        }
-    } catch (e) { console.error("Firestore Check Error:", e); }
+    // Se esiste già nella cache locale del client, lo mostra direttamente
+    if (hasToneInCache(toneKey)) {
+        return window.openToneModal(toneKey);
+    }
 
-    // 3. Generazione chirurgica F4 se non trovato altrove
-    await generateSingleTone(toneKey, jobId);
+    // Altrimenti, effettua la chiamata a BullMQ e apre immediatamente la modale vettoriale
+    lockDashboardPlatformSelection(); // primo click tono: blocca piattaforma solo in dashboard
+    await generateSingleToneWithInteractivePrism(toneKey, jobId, platform);
 };
 
-/**
- * Chiama l'API di generazione specifica per un singolo tono
- */
-async function generateSingleTone(toneKey, jobId) {
-    const modal = document.getElementById('prism-modal');
-    const progressBar = document.getElementById('p-bar');
-    const statusMsg = document.getElementById('status-msg');
-    const checklist = document.querySelector('.checklist-container');
-    const userData = getCurrentUserData();
-    const BACKEND_URL = getBackendUrl();
+/** Blocca i pill piattaforma nella dashboard (non nel popup di rigenerazione). */
+function lockDashboardPlatformSelection() {
+    dashboardPlatformLocked = true;
+    const platformPill = document.querySelector('#settingsRow .platform-pill');
+    if (platformPill) {
+        platformPill.classList.add('platform-locked');
+        platformPill.style.pointerEvents = 'none';
+        platformPill.style.opacity = '0.55';
+    }
+}
 
-    // Reset interfaccia per modalità "Scrittura"
-    modal.style.display = 'flex';
-    if (checklist) checklist.style.display = 'none'; // Nasconde Shaping/Search/Refiner
-    statusMsg.innerText = `PRISM sta scrivendo il post [${toneKey.toUpperCase()}]...`;
-    progressBar.style.width = '15%';
+/** Sblocca i pill piattaforma dashboard (es. su PULISCI). */
+function unlockDashboardPlatformSelection() {
+    dashboardPlatformLocked = false;
+    const platformPill = document.querySelector('#settingsRow .platform-pill');
+    if (platformPill) {
+        platformPill.classList.remove('platform-locked');
+        platformPill.style.pointerEvents = '';
+        platformPill.style.opacity = '';
+    }
+}
+
+/**
+ * Gestisce il flusso asincrono premium: apertura istantanea della modale con modulo di caricamento (Prisma SVG + Label),
+ * blocco temporaneo dello scroll per prevenire sfarfallii e layout shift durante la digitazione,
+ * ricezione del blocco dati con posizionamento in background del modulo di caricamento, typewriter ultra-veloce,
+ * completamento con sblocco dello scroll, dissolvenza totale del modulo e attivazione del glow.
+ */
+async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform) {
+    const modal = document.getElementById('output-modal'); // modale output tono
+    const modalBox = document.getElementById('output-modal-box'); // box contenuto
+    const titleEl = document.getElementById('modal-tone-title'); // titolo modale
+    const textEl = document.getElementById('modal-tone-text'); // area testo
+    const assetsEl = document.getElementById('modal-tone-assets'); // area media
+
+    const userData = getCurrentUserData(); // uid + companyId
+    const BACKEND_URL = getBackendUrl(); // URL backend BullMQ
+
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout); // ferma typewriter precedente
+    if (tonePollInterval) clearInterval(tonePollInterval); // ferma polling F4 precedente
+    tonePollInterval = null; // reset handle polling F4
+    toneGenHasSeenGenerating = false; // reset flag F4
+    toneGenRevealStarted = false; // reset flag reveal
+
+    titleEl.innerText = `PRISM - Generazione in corso [${toneKey.toUpperCase()}]...`; // titolo loading
+    textEl.innerHTML = ''; // svuota testo
+    assetsEl.innerHTML = ''; // svuota media
+
+    resetWorkspaceSidebarState(); // reset sidebar workspace
+    applyOutputModalToneTheme(toneKey); // colori bordo modale
+    if (modalBox) {
+        modalBox.style.width = '750px'; // modale compatta durante generazione
+        modalBox.classList.remove('completed-glow'); // rimuove glow
+        modalBox.style.overflowY = 'hidden'; // blocca scroll durante prisma
+    }
+
+    openToneGenPrismLoader(TONE_GEN_STEP_LABELS.generation, 0.90); // mostra spinner F4
+    modal.style.display = 'flex'; // apre modale output
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/regenerate-tone-surgical`, {
+        const response = await fetch(`${BACKEND_URL}/api/regenerate-tone-surgical`, { // avvia F4
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userId: userData.userId,
-                companyId: userData.companyId, 
+                companyId: userData.companyId,
                 toneKey: toneKey,
-                jobId: jobId
+                jobId: jobId,
+                platform: platform,
+                language: 'italiano'
             })
         });
 
-        const result = await response.json();
-        if (!result.success) throw new Error(result.error);
+        const result = await response.json(); // risposta API
+        if (!result.success) throw new Error(result.error); // errore avvio F4
 
-        if (pollInterval) clearInterval(pollInterval);
+        await pollToneGenerationOnce(toneKey, jobId, userData.userId, BACKEND_URL, modalBox, titleEl, textEl); // primo tick immediato
 
-        // Polling per la generazione del tono
-        pollInterval = setInterval(async () => {
-            const pr = await fetch(`${BACKEND_URL}/jobs/status/${userData.userId}/${jobId}`);
-            const ps = await pr.json();
-            
-            if (!ps.success) return handlePipelineError("Errore nella generazione del tono");
-
-            const task = ps.data;
-
-            // INTERCETTAZIONE ERRORE CRITICO (Es: Profilo BASIC non autorizzato)
-            if (task.status === 'failed') {
-                return handlePipelineError(task.error?.message || "Errore di generazione");
-            }
-
-            progressBar.style.width = `${(task.pipeline.progress * 100)}%`;
-            statusMsg.innerText = task.pipeline.message;
-
-            // Se completato, carica i dati e apri il modale finale
-            if ((task.status === 'completed' || task.status === 'done') && task.tones?.[toneKey]?.text) {
-                clearInterval(pollInterval);
-                globalCacheTones = task.tones;
-                const assets = extractAllDatabaseAssets(task);
-                globalCacheMedia = assets;
-                
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    if (checklist) checklist.style.display = 'block'; // Ripristina per prossimo uso
-                    window.openToneModal(toneKey);
-                }, 500);
+        tonePollInterval = setInterval(async () => { // polling ogni 2s
+            try {
+                const done = await pollToneGenerationOnce(toneKey, jobId, userData.userId, BACKEND_URL, modalBox, titleEl, textEl);
+                if (done && tonePollInterval) { clearInterval(tonePollInterval); tonePollInterval = null; } // stop se completato
+            } catch (pollErr) {
+                console.warn('Polling F4 in corso...', pollErr); // errore transitorio rete
             }
         }, 2000);
 
     } catch (error) {
-        handlePipelineError(error.message);
+        modal.style.display = 'none'; // chiude modale
+        hideToneGenPrismLoader(); // nasconde prisma
+        console.error('🚨 [PRISM GENERATION ERROR]:', error.message); // log
+        alert(`Errore di connessione o generazione: ${error.message}`); // alert
     }
 }
+
+/**
+ * Gestisce l'effetto typewriter saltando i tag HTML per evitare sfarfallii visivi o stampe di codice grezzo.
+ */
+function typewriterHTML(element, html, speed, callback) {
+    if (!element) { if (callback) callback(); return; } // target mancante
+    let currentHtml = ''; // HTML accumulato carattere per carattere
+    let i = 0; // indice posizione nella stringa
+
+    function step() {
+        if (i < html.length) { // caratteri rimanenti
+            if (html[i] === '<') { // inizio tag HTML
+                const endTagIndex = html.indexOf('>', i); // fine tag
+                if (endTagIndex !== -1) { // tag completo trovato
+                    currentHtml += html.substring(i, endTagIndex + 1); // inietta tag intero
+                    i = endTagIndex + 1; // salta oltre il tag
+                } else { // tag malformato
+                    currentHtml += html[i]; // aggiungi carattere singolo
+                    i++; // avanza
+                }
+            } else { // carattere testo normale
+                currentHtml += html[i]; // aggiungi carattere
+                i++; // avanza
+            }
+            element.innerHTML = currentHtml; // renderizza HTML parziale
+            activeTypewriterTimeout = setTimeout(step, speed); // prossimo carattere
+        } else { // scrittura completata
+            if (callback) callback(); // callback post-typewriter
+        }
+    }
+    step(); // avvia loop
+}
+
+/**
+ * Renderizza i riferimenti media (immagini) sotto il testo del post.
+ */
+function renderToneAssetsAndActions(toneKey) {
+    const assetsEl = document.getElementById('modal-tone-assets');
+    if (!assetsEl) return;
+
+    let mediaGalleryHtml = "";
+    if (globalCacheMedia.verifiedImages && globalCacheMedia.verifiedImages.length > 0) {
+        mediaGalleryHtml += `<div style="margin-top:20px; border-top:1px solid #27272a; padding-top:10px;"><h4 style="color:#3b82f6; font-size:11px; margin-bottom:10px;">📸 MEDIA RIFERIMENTO</h4><div style="display:flex; gap:10px; overflow-x:auto; padding-bottom:10px;">`;
+        globalCacheMedia.verifiedImages.forEach(img => {
+            const url = typeof img === 'string' ? img : img.url;
+            mediaGalleryHtml += `<img src="${url}" style="height:100px; border-radius:6px; border:1px solid #27272a;">`;
+        });
+        mediaGalleryHtml += `</div></div>`;
+    }
+
+    assetsEl.innerHTML = mediaGalleryHtml;
+}
+
+window.regenerateCurrentTone = function() {
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    const platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
+    if (!jobId || !currentActiveToneKey) return;
+    
+    // Rimuove il vecchio tono dalla cache per forzare la riscrittura
+    if (globalCacheTones[currentActiveToneKey]) delete globalCacheTones[currentActiveToneKey];
+    
+    // Innesca il flusso della modale interattiva da zero
+    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform);
+};
 
 // ==========================================
 // 7. UTILITY ESTRATTORE E MODALE
@@ -347,36 +1092,62 @@ function extractAllDatabaseAssets(data) {
     if (!data) return { images: [], sources: [] };
     const target = data.testo ? data.testo : (data.data ? data.data : data);
     const assets = { images: [], sources: [] };
-
-    if (target.media_support) {
-        assets.images = target.media_support.verified_images || target.media_support.verifiedImages || [];
-    } else if (data.media_support) {
-        assets.images = data.media_support.verified_images || [];
-    }
-
+    if (target.media_support) assets.images = target.media_support.verified_images || target.media_support.verifiedImages || [];
+    else if (data.media_support) assets.images = data.media_support.verified_images || [];
     assets.sources = target.sources_preview || target.sourcesPreview || [];
     return assets;
 }
 
+/**
+ * Apre la modale per toni già generati o salvati in cache in modo istantaneo,
+ * con lo scorrimento già abilitato, il modulo di caricamento (Prisma + Testo) nascosto e il glow perimetrale attivo.
+ */
 window.openToneModal = function(toneKey) {
-    if (!globalCacheTones || !globalCacheTones[toneKey]) return;
+    currentActiveToneKey = toneKey;
+    const toneText = getToneTextFromCache(toneKey); // tones[toneKey].versions[n].text
+    if (!toneText.trim()) return; // nessun contenuto in cache
+
+    const modal = document.getElementById('output-modal');
+    const modalBox = document.getElementById('output-modal-box');
+    const prismBg = document.getElementById('tone-gen-prism-loader');
+    const titleEl = document.getElementById('modal-tone-title');
+    const textEl = document.getElementById('modal-tone-text');
+
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
+
+    resetWorkspaceSidebarState();
+
+    applyOutputModalToneTheme(toneKey);
+
+    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
     
-    const rawText = globalCacheTones[toneKey].text || "";
-    const richHTMLContent = parseAndCleanContentForModal(rawText);
+    const richHTMLContent = parseAndCleanContentForModal(toneText);
+    textEl.innerHTML = `<div style="color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${richHTMLContent}</div>`;
     
-    document.getElementById('modal-tone-title').innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
-    
-    // Logica Gallerie/Fonti integrata nel modale (omessa per brevità ma presente nel sistema)
-    // ...
-    
-    document.getElementById('modal-tone-text').innerHTML = `
-        <div style="color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${richHTMLContent}</div>
-    `;
-    document.getElementById('output-modal').style.display = 'flex';
+    // Disattiva il modulo di caricamento e attiva immediatamente lo scorrimento, l'espansione e il glow perimetrale
+    if (prismBg) {
+        prismBg.style.opacity = '0';
+        prismBg.style.display = 'none';
+    }
+    if (modalBox) {
+        modalBox.style.width = '950px'; // Espande la modale per visualizzare la sidebar
+        modalBox.classList.add('completed-glow');
+        modalBox.style.overflowY = 'auto'; 
+    }
+
+    renderToneAssetsAndActions(toneKey);
+    modal.style.display = 'flex';
+    triggerUserGuidePhase5IfNeeded();
 };
 
 window.closeToneModal = function() { 
-    document.getElementById('output-modal').style.display = 'none'; 
+    document.getElementById('output-modal').style.display = 'none';
+    if (userGuideCurrentPhase === 5) hideUserGuide();
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
+    if (pollInterval) clearInterval(pollInterval);
+    if (tonePollInterval) clearInterval(tonePollInterval);
+    tonePollInterval = null;
+    resetWorkspaceSidebarState();
 };
 
 function parseAndCleanContentForModal(text) {
@@ -386,5 +1157,467 @@ function parseAndCleanContentForModal(text) {
     });
 }
 
-window.clearInput = function() { if (topicInputTextarea) { topicInputTextarea.value = ''; updateCounter(); } };
-window.selP = function(el) { document.querySelectorAll('.pill').forEach(p => p.classList.remove('active')); el.classList.add('active'); };
+window.selP = function(el) {
+    if (dashboardPlatformLocked) return;
+    document.querySelectorAll('#settingsRow .pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+};
+
+// ==========================================
+// 8. LOGICA WORKSPACE STRUMENTI (SIDEBAR & EXTENSION PANELS)
+// ==========================================
+
+function resetWorkspaceSidebarState() {
+    const sidebar = document.getElementById('modal-sidebar');
+    const extensionPane = document.getElementById('sidebar-extension-pane');
+    const extensionBody = document.getElementById('sidebar-extension-body');
+    const regenContent = document.getElementById('regen-options');
+    const regenArrow = document.getElementById('arrow-regen-options');
+
+    closeSidebarExtension();
+    if (sidebar) sidebar.classList.remove('sidebar-collapsed', 'sidebar-expanded');
+    if (extensionBody) extensionBody.innerHTML = '';
+    if (extensionPane) extensionPane.classList.remove('active');
+    if (regenContent) regenContent.style.maxHeight = '0px';
+    if (regenArrow) regenArrow.classList.remove('open');
+}
+
+window.toggleSidebarCollapse = function() {
+    const sidebar = document.getElementById('modal-sidebar');
+    const modalBox = document.getElementById('output-modal-box');
+    if (!sidebar || !modalBox?.classList.contains('completed-glow')) return;
+
+    sidebar.classList.toggle('sidebar-collapsed');
+    if (sidebar.classList.contains('sidebar-collapsed')) closeSidebarExtension();
+};
+
+window.toggleSidebarGroup = function(groupId) {
+    const content = document.getElementById(groupId);
+    const arrow = document.getElementById(`arrow-${groupId}`);
+    if (!content) return;
+
+    if (content.style.maxHeight && content.style.maxHeight !== '0px') {
+        content.style.maxHeight = '0px';
+        if (arrow) arrow.classList.remove('open');
+    } else {
+        content.style.maxHeight = content.scrollHeight + 'px';
+        if (arrow) arrow.classList.add('open');
+    }
+};
+
+window.copyModalText = function() {
+    const textEl = document.getElementById('modal-tone-text');
+    const toast = document.getElementById('workspace-copy-toast');
+    if (!textEl) return;
+
+    const textToCopy = textEl.innerText || textEl.textContent;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        if (toast) {
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+    }).catch(err => {
+        console.error("Errore di copia negli appunti:", err);
+    });
+};
+
+window.openSidebarExtension = function(toolType) {
+    const sidebar = document.getElementById('modal-sidebar');
+    const extensionPane = document.getElementById('sidebar-extension-pane');
+    const body = document.getElementById('sidebar-extension-body');
+    if (!sidebar || !extensionPane || !body) return;
+
+    if (sidebar.classList.contains('sidebar-collapsed')) {
+        sidebar.classList.remove('sidebar-collapsed');
+    }
+
+    sidebar.classList.add('sidebar-expanded');
+    extensionPane.classList.add('active');
+
+    if (toolType === 'total-regen') {
+        body.innerHTML = `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Rigenerazione totale</h4>
+            <p style="font-size:12px; color:var(--text-dim); margin-bottom:4px; line-height:1.5;">Seleziona la piattaforma social di destinazione.</p>
+            <div class="overlay-platform-pill">
+                <div class="pill" onclick="selOverlayP(this)"><i class="fab fa-facebook"></i> Facebook</div>
+                <div class="pill active" onclick="selOverlayP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
+                <div class="pill" onclick="selOverlayP(this)">X</div>
+            </div>
+            <button class="overlay-action-btn" onclick="executeSurgicalRegen('total')">Rigenera <i class="fas fa-bolt"></i></button>
+        `;
+    } else if (toolType === 'instructions-regen') {
+        body.innerHTML = `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Con istruzioni</h4>
+            <p style="font-size:12px; color:var(--text-dim); line-height:1.5;">Indicazioni specifiche per PRISM (max 100 caratteri).</p>
+            <textarea class="overlay-textarea" id="overlay-instructions-input" maxlength="100" placeholder="Es. aggiungi emoji, rendilo più formale..." oninput="updateOverlayCharCounter(this)"></textarea>
+            <div class="overlay-char-counter" id="overlay-chars-left">100 caratteri rimasti</div>
+            <button class="overlay-action-btn" onclick="executeSurgicalRegen('instructions')">Rigenera <i class="fas fa-bolt"></i></button>
+        `;
+    } else if (toolType === 'compare-versions') {
+        body.innerHTML = `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta versioni</h4>
+            <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Vista affiancata per confrontare le modifiche storiche.</p>
+            <div style="border: 1px dashed #27272a; padding: 30px 20px; border-radius: 8px; text-align: center; color: var(--text-dim); font-size:12px; min-height: 120px; display:flex; align-items:center; justify-content:center;">
+                Funzionalità in arrivo con la prossima versione
+            </div>
+        `;
+    }
+};
+
+window.closeSidebarExtension = function() {
+    const sidebar = document.getElementById('modal-sidebar');
+    const extensionPane = document.getElementById('sidebar-extension-pane');
+    const body = document.getElementById('sidebar-extension-body');
+
+    if (sidebar) sidebar.classList.remove('sidebar-expanded');
+    if (extensionPane) extensionPane.classList.remove('active');
+    if (body) body.innerHTML = '';
+};
+
+window.selOverlayP = function(el) {
+    const container = el.closest('.overlay-platform-pill');
+    if (!container) return;
+    container.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+};
+
+window.updateOverlayCharCounter = function(textarea) {
+    const counter = document.getElementById('overlay-chars-left');
+    if (!counter) return;
+    const remaining = 100 - textarea.value.length;
+    counter.innerText = `${remaining} caratteri rimasti`;
+    counter.classList.toggle('low-chars', remaining <= 10);
+};
+
+window.executeSurgicalRegen = function(type) {
+    let platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
+    if (type === 'total') {
+        const overlayActive = document.querySelector('.overlay-platform-pill .pill.active');
+        if (overlayActive) platform = overlayActive.innerText.trim();
+    }
+
+    const instructions = document.getElementById('overlay-instructions-input')?.value.trim() || '';
+    console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platform}, istruzioni: ${instructions || '(nessuna)'}`);
+
+    closeSidebarExtension();
+
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    if (!jobId || !currentActiveToneKey) return;
+
+    if (globalCacheTones[currentActiveToneKey]) delete globalCacheTones[currentActiveToneKey];
+    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform);
+};
+
+// ==========================================
+// 9. USER GUIDE ONBOARDING (FREEMIUM — user_guide: true)
+// ==========================================
+
+const USER_GUIDE_TEXTS = {
+    1: "Benvenuto su PRISM! Inserisci qui lo spunto del tuo post. Può essere un'idea abbozzata, un fatto di cronaca o un concetto grezzo.",
+    2: "Ottimo. Ora clicca su ANALIZZA. PRISM cercherà le fonti più autorevoli in tempo reale e preparerà i fatti per la scrittura.",
+    4: "La rifrazione è pronta. Scegli una piattaforma e uno dei 6 toni in basso per vedere il Prisma in azione e generare il tuo post specifico per Facebook, LinkedIn o X. Avrai a disposizione anche lo Split-View per confrontare le modifiche!",
+    5: "Ecco la tua rifrazione! Usa lo Split-View per confrontare le modifiche se chiedi una rigenerazione. Trovi le fonti inespresse nel Pannello Strategico in basso."
+};
+
+let userGuideTargetEl = null;
+
+function initUserGuide() {
+    if (!userGuideActive) return;
+
+    const cancelBtn = document.getElementById('guide-btn-cancel');
+    const confirmBtn = document.getElementById('guide-btn-confirm');
+    if (cancelBtn && !cancelBtn.dataset.bound) {
+        cancelBtn.dataset.bound = '1';
+        cancelBtn.addEventListener('click', dismissUserGuideTemporary);
+    }
+    if (confirmBtn && !confirmBtn.dataset.bound) {
+        confirmBtn.dataset.bound = '1';
+        confirmBtn.addEventListener('click', dismissUserGuidePermanent);
+    }
+
+    attachGuidePositionListener();
+
+    const text = topicInputTextarea?.value.trim() || '';
+    if (countInputWords(text) >= MIN_WORDS_FOR_ANALYZE) {
+        showUserGuidePhase(2);
+    } else {
+        showUserGuidePhase(1);
+    }
+}
+
+function getUserGuideTarget(phase) {
+    if (phase === 1) return document.querySelector('.input-box');
+    if (phase === 2) return document.getElementById('mainGenBtn');
+    if (phase === 4) return document.querySelector('.tones-grid');
+    if (phase === 5) return document.getElementById('modal-sidebar') || document.getElementById('output-modal-box');
+    return null;
+}
+
+function getUserGuidePlacement(phase) {
+    if (phase === 1) return 'bottom';
+    if (phase === 2) return 'left';
+    if (phase === 4) return 'bottom';
+    if (phase === 5) return 'left';
+    return 'bottom';
+}
+
+function markGuideInteractiveZones(phase) {
+    clearGuideInteractiveZones();
+    if (phase !== 4) return;
+
+    ['.input-flex-container', '.settings-row', '.tones-grid'].forEach((selector) => {
+        const el = document.querySelector(selector);
+        if (el) {
+            el.classList.add('guide-interactive-zone');
+            userGuideInteractiveEls.push(el);
+        }
+    });
+}
+
+function clearGuideInteractiveZones() {
+    userGuideInteractiveEls.forEach((el) => el.classList.remove('guide-interactive-zone'));
+    userGuideInteractiveEls = [];
+}
+
+function getProtectedGuideRects() {
+    const selectors = [
+        'textarea',
+        'button',
+        '.input-box',
+        '.side-actions',
+        '.settings-row',
+        '.tone-card',
+        '.credits-footer'
+    ];
+    const rects = [];
+    const callout = document.getElementById('user-guide-callout');
+
+    selectors.forEach((selector) => {
+        document.querySelectorAll(selector).forEach((el) => {
+            if (callout && (el === callout || callout.contains(el))) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) rects.push(rect);
+        });
+    });
+
+    return rects;
+}
+
+function calloutOverlapsProtected(top, left, width, height, margin = 10) {
+    const callout = {
+        top: top - margin,
+        left: left - margin,
+        right: left + width + margin,
+        bottom: top + height + margin
+    };
+
+    return getProtectedGuideRects().some((rect) => !(
+        callout.right < rect.left ||
+        callout.left > rect.right ||
+        callout.bottom < rect.top ||
+        callout.top > rect.bottom
+    ));
+}
+
+function computeCalloutPosition(target, placement, calloutWidth, calloutHeight) {
+    const rect = target.getBoundingClientRect();
+    const gap = 16;
+    let top = 0;
+    let left = 0;
+
+    if (placement === 'bottom') {
+        top = rect.bottom + gap;
+        left = rect.left + (rect.width / 2) - (calloutWidth / 2);
+    } else if (placement === 'top') {
+        top = rect.top - calloutHeight - gap;
+        left = rect.left + (rect.width / 2) - (calloutWidth / 2);
+    } else if (placement === 'left') {
+        top = rect.top + (rect.height / 2) - (calloutHeight / 2);
+        left = rect.left - calloutWidth - gap;
+    } else if (placement === 'right') {
+        top = rect.top + (rect.height / 2) - (calloutHeight / 2);
+        left = rect.right + gap;
+    }
+
+    return { top, left };
+}
+
+function resolveCalloutPosition(target, placement, calloutWidth, calloutHeight) {
+    const pad = 12;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    let { top, left } = computeCalloutPosition(target, placement, calloutWidth, calloutHeight);
+
+    const shifts = [
+        { top: 0, left: 0 },
+        { top: 18, left: 0 },
+        { top: 36, left: 0 },
+        { top: -18, left: 0 },
+        { top: 0, left: 24 },
+        { top: 0, left: -24 },
+        { top: 18, left: 24 },
+        { top: 18, left: -24 },
+        { top: 36, left: 48 },
+        { top: 36, left: -48 }
+    ];
+
+    for (const shift of shifts) {
+        let candidateTop = top + shift.top;
+        let candidateLeft = left + shift.left;
+
+        candidateLeft = Math.max(pad, Math.min(candidateLeft, viewportW - calloutWidth - pad));
+        candidateTop = Math.max(pad, Math.min(candidateTop, viewportH - calloutHeight - pad));
+
+        if (!calloutOverlapsProtected(candidateTop, candidateLeft, calloutWidth, calloutHeight)) {
+            return { top: candidateTop, left: candidateLeft };
+        }
+    }
+
+    left = Math.max(pad, Math.min(left, viewportW - calloutWidth - pad));
+    top = Math.max(pad, Math.min(top, viewportH - calloutHeight - pad));
+    return { top, left };
+}
+
+function attachGuidePositionListener() {
+    if (userGuidePositionHandler) return;
+    userGuidePositionHandler = () => {
+        if (userGuideCurrentPhase > 0 && userGuideTargetEl) {
+            positionUserGuideCallout(userGuideTargetEl, getUserGuidePlacement(userGuideCurrentPhase));
+        }
+    };
+    window.addEventListener('resize', userGuidePositionHandler);
+    window.addEventListener('scroll', userGuidePositionHandler, true);
+}
+
+function showUserGuidePhase(phase) {
+    if (!userGuideActive) return;
+
+    const target = getUserGuideTarget(phase);
+    if (!target) {
+        if (phase === 4) setTimeout(() => showUserGuidePhase(4), 400);
+        return;
+    }
+
+    hideUserGuide(false);
+    userGuideCurrentPhase = phase;
+
+    const overlay = document.getElementById('user-guide-overlay');
+    const callout = document.getElementById('user-guide-callout');
+    const textEl = document.getElementById('user-guide-callout-text');
+    if (!overlay || !callout || !textEl) return;
+
+    userGuideTargetEl = target;
+    target.classList.add('guide-target-highlight');
+    userGuideHighlightedEl = target;
+
+    if (phase === 2) {
+        const inputBox = document.querySelector('.input-box');
+        if (inputBox) {
+            inputBox.classList.add('guide-textarea-accessible');
+            userGuideTextareaEl = inputBox;
+        }
+    }
+
+    if (phase === 4) {
+        overlay.classList.add('guide-overlay-usable');
+        markGuideInteractiveZones(4);
+    } else {
+        overlay.classList.remove('guide-overlay-usable');
+        clearGuideInteractiveZones();
+    }
+
+    textEl.textContent = USER_GUIDE_TEXTS[phase] || '';
+    const placement = getUserGuidePlacement(phase);
+    callout.setAttribute('data-placement', placement);
+    callout.setAttribute('data-phase', String(phase));
+    callout.classList.toggle('has-actions', phase === 5);
+
+    if (phase === 4) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        setTimeout(() => positionUserGuideCallout(target, placement), 400);
+    } else {
+        positionUserGuideCallout(target, placement);
+    }
+
+    requestAnimationFrame(() => {
+        overlay.classList.add('active');
+        callout.classList.add('active');
+        positionUserGuideCallout(target, placement);
+    });
+}
+
+function positionUserGuideCallout(target, placement) {
+    const callout = document.getElementById('user-guide-callout');
+    if (!callout || !target) return;
+
+    callout.style.visibility = 'hidden';
+    callout.style.display = 'block';
+
+    const calloutRect = callout.getBoundingClientRect();
+    const cw = calloutRect.width || 320;
+    const ch = calloutRect.height || 120;
+
+    const { top, left } = resolveCalloutPosition(target, placement, cw, ch);
+
+    callout.style.top = `${top}px`;
+    callout.style.left = `${left}px`;
+    callout.style.visibility = '';
+}
+
+function hideUserGuide(clearPhase = true) {
+    const overlay = document.getElementById('user-guide-overlay');
+    const callout = document.getElementById('user-guide-callout');
+
+    if (overlay) {
+        overlay.classList.remove('active', 'guide-overlay-usable');
+    }
+    if (callout) {
+        callout.classList.remove('active', 'has-actions');
+        callout.removeAttribute('data-phase');
+    }
+
+    clearGuideInteractiveZones();
+
+    if (userGuideHighlightedEl) {
+        userGuideHighlightedEl.classList.remove('guide-target-highlight');
+        userGuideHighlightedEl = null;
+    }
+
+    if (userGuideTextareaEl) {
+        userGuideTextareaEl.classList.remove('guide-textarea-accessible');
+        userGuideTextareaEl = null;
+    }
+
+    userGuideTargetEl = null;
+    if (clearPhase) userGuideCurrentPhase = 0;
+}
+
+function triggerUserGuidePhase5IfNeeded() {
+    if (!userGuideActive || !userGuideAwaitingPhase5) return;
+    setTimeout(() => showUserGuidePhase(5), 550);
+}
+
+function dismissUserGuideTemporary() {
+    hideUserGuide(false);
+    userGuideCurrentPhase = 0;
+}
+
+async function dismissUserGuidePermanent() {
+    const userId = currentUserSessionData.userId || sessionStorage.getItem('prism_user_uid');
+    if (!userId || !window.db) return;
+
+    try {
+        await window.db.collection('users').doc(userId).update({
+            user_guide: false,
+            updated_at: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        userGuideActive = false;
+        userGuideAwaitingPhase5 = false;
+        hideUserGuide();
+        console.log('✅ [GUIDE] user_guide disattivato per', userId);
+    } catch (err) {
+        console.error('❌ [GUIDE] Errore aggiornamento user_guide:', err.message);
+        alert('Impossibile salvare la preferenza. Riprova.');
+    }
+}

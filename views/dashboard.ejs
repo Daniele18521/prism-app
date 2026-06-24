@@ -1,3 +1,5 @@
+<!-- START OF FILE dashboard.ejs -->
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -25,6 +27,9 @@
             display: flex;
             flex-direction: column;
             min-height: 100vh;
+            overflow-x: hidden;
+            /* Padding inferiore aggiuntivo per fare spazio al footer fisso ed evitare sovrapposizioni di contenuto */
+            padding-bottom: 80px; 
         }
 
         /* --- HEADER --- */
@@ -32,185 +37,97 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-        }
-
-        .logo-text { font-size: 24px; font-weight: 800; color: var(--text-dim); }
-        .logo-text span { color: #fff; font-size: 32px; margin-left: 10px; }
-
-        .nav-right { display: flex; gap: 20px; font-size: 14px; color: var(--text-dim); }
-        .nav-right span { cursor: pointer; display: flex; align-items: center; gap: 6px; }
-
-        /* --- AREA INPUT --- */
-        .top-section {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
             margin-bottom: 10px;
         }
 
-        .input-box {
-            flex: 1;
-            max-width: 800px;
+        .nav-right { display: flex; gap: 20px; font-size: 13px; align-items: center; }
+        .nav-right span { cursor: pointer; color: var(--text-dim); transition: color 0.2s; }
+        .nav-right span:hover { color: #fff; }
+
+        /* --- AREA INPUT --- */
+        .input-flex-container {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 20px;
+            width: 100%;
+            max-width: 1050px;
+            margin: 0 auto 20px auto;
         }
 
+        .input-box { flex: 1; max-width: 800px; position: relative; }
+
         .rainbow-line {
-            height: 4px; /* Leggermente più spessa per far risaltare il colore */
-            background: linear-gradient(
-                to right, 
-                #3b82f6, /* Polemico */
-                #10b981, /* Accademico */
-                #f59e0b, /* Narrativo */
-                #ef4444, /* Umano */
-                #a855f7, /* Scherzoso */
-                #ec4899  /* Pragmatico */
-            );
-            /* Aggiunge un bagliore soffuso per dare vita ai colori */
-            box-shadow: 0 0 12px rgba(255, 255, 255, 0.1); 
-            position: relative;
+            height: 4px;
+            background: linear-gradient(to right, #3b82f6, #f59e0b, #ef4444, #a855f7, #ec4899, #06b6d4);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
             z-index: 1;
         }
 
-        .rainbow-line::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: linear-gradient(to bottom, rgba(255,255,255,0.2), transparent);
-            pointer-events: none;
-        }
-
-        /* Nuova riga impostazioni senza bordo e centrata */
-        .settings-row {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 40px; /* Spazio tra Social e Lingua */
-            width: 100%;
-            margin-bottom: 25px;
-        }
-
-        .setting-group {
-            display: flex;
-            align-items: center;
-            gap: 15px; /* Spazio tra Label e Componente */
-        }
-
-        .setting-label {
-            font-size: 12px;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0 !important; /* Toglie il margine sotto per allinearla di fianco */
-        }
-
         textarea {
-            width: 100%;
-            height: 120px;
-            background: transparent;
-            border: none;
-            color: #fff;
-            padding: 20px;
-            font-size: 16px;
-            resize: none;
-            outline: none;
+            width: 100%; height: 120px;
+            background: transparent; border: none;
+            color: #fff; padding: 20px; font-size: 16px;
+            resize: none; outline: none;
         }
 
         .input-info {
-            display: flex;
-            justify-content: flex-end;
-            padding: 10px 20px;
-            font-size: 12px;
-            color: var(--text-dim);
-            gap: 15px;
+            display: flex; justify-content: flex-end;
+            padding: 10px 20px; font-size: 12px; color: var(--text-dim);
         }
 
-        .settings-grid {
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            text-align: center;
-            background: rgba(255, 255, 255, 0.01);
-            border: 1px solid var(--border-grey);
-            border-radius: 8px;
-            padding: 20px;
+        /* --- BOTTONI AZIONE --- */
+        .side-actions { display: flex; flex-direction: column; gap: 10px; width: 180px; }
+
+        .generate-btn {
+            background: var(--accent-blue); color: #fff;
+            border: none; padding: 14px; border-radius: 8px;
+            font-weight: 700; font-size: 13px; cursor: pointer;
+            text-transform: uppercase; transition: all 0.3s;
+            opacity: 0.3; /* Inizialmente spento */
+        }
+
+        .reset-btn {
+            background: transparent; border: 1px solid var(--border-grey);
+            color: var(--text-dim); padding: 10px; border-radius: 8px;
+            font-size: 11px; font-weight: 600; cursor: pointer;
+            text-transform: uppercase; display: flex;
+            align-items: center; justify-content: center; gap: 8px;
+            opacity: 0.3;
+        }
+
+        .reset-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+        /* --- SETTINGS (BLOCCATI INITIAL) --- */
+        .settings-row {
+            display: flex; justify-content: center; align-items: center; gap: 40px;
+            margin-bottom: 30px; pointer-events: none; opacity: 0.5;
         }
 
         .platform-pill {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 30px;
-            padding: 4px;
-            display: flex;
-            gap: 5px;
+            background: #18181b; border: 1px solid #27272a;
+            border-radius: 30px; padding: 4px; display: flex; gap: 5px;
         }
 
         .pill {
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-size: 13px;
-            cursor: pointer;
-            color: var(--text-dim);
-            display: flex;
-            align-items: center; gap: 6px;
+            padding: 8px 15px; border-radius: 20px; font-size: 13px;
+            cursor: pointer; color: var(--text-dim); display: flex; align-items: center; gap: 6px;
         }
-
         .pill.active { background: #3f3f46; color: #fff; }
 
-        .lang-select {
-            background: #000; border: 1px solid #3f3f46; color: #fff;
-            padding: 10px 20px; border-radius: 8px; font-size: 14px;
+        .platform-pill.platform-locked {
+            cursor: not-allowed;
         }
 
-        /* --- ACTION ROW --- */
-        .action-row { display: flex; justify-content: center; margin-bottom: 30px; }
-
-        /* Bottone Analizza (Primario) */
-        .generate-btn {
-            width: 100% !important;
-            background: var(--accent-blue);
-            color: #fff;
-            border: none;
-            padding: 14px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 13px;
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: all 0.2s;
+        .platform-pill.platform-locked .pill {
+            cursor: not-allowed;
         }
 
-        /* Bottone Pulisci (Secondario) */
-        .reset-btn {
-            width: 100%;
-            background: transparent;
-            border: 1px solid var(--border-grey);
-            color: var(--text-dim);
-            padding: 10px;
-            border-radius: 8px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            text-transform: uppercase;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s;
-        }
+        .lang-select { background: #000; border: 1px solid #3f3f46; color: #fff; padding: 8px 15px; border-radius: 20px; font-size: 14px; }
 
-        .reset-btn:hover {
-            border-color: #ef4444;
-            color: #ef4444;
-            background: rgba(239, 68, 68, 0.05);
-        }
-
-        .generate-btn:hover { background: #1d4ed8; transform: translateY(-1px); }
-
-        /* --- GRID TONI --- */
+        /* --- GRID TONI & LOCK SYSTEM --- */
         .tones-grid {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            display: grid; grid-template-columns: repeat(6, 1fr);
             gap: 12px; margin-bottom: 40px;
         }
 
@@ -218,133 +135,900 @@
             background: rgba(255, 255, 255, 0.02);
             border: 1px solid var(--border-grey);
             border-radius: 8px; padding: 22px 16px;
-            text-align: center; opacity: 0.3; cursor: not-allowed;
-            pointer-events: none; transition: all 0.4s;
-            position: relative;
+            text-align: center; opacity: 0.2; 
+            cursor: not-allowed; position: relative;
+            transition: all 0.4s ease;
         }
 
-        /* --- EFFETTO CARD ABILITATA --- */
         .tone-card.enabled {
-            opacity: 1;
-            cursor: pointer;
-            pointer-events: auto;
-            background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
-            /* Aggiunge un bordo sottile colorato su tutta la card e un'ombra esterna */
+            opacity: 1; cursor: pointer;
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-left: 5px solid var(--card-color) !important;
-            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2); /* Profondità interna */
-            transition: all 0.3s ease;
         }
+
+        .tone-card.locked-by-plan {
+            opacity: 0.25 !important;
+            filter: grayscale(0.8);
+        }
+
+        /* --- LOCK BADGE 3D BI-METALLO --- */
+        .lock-badge {
+            position: absolute; top: 12px; right: 12px; font-size: 20px; 
+            background: linear-gradient(180deg, #e5e7eb 0%, #9ca3af 42%, #fde047 42%, #ca8a04 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(2px 3px 2px rgba(0,0,0,0.7));
+            opacity: 1; display: none; z-index: 5;
+        }
+
+        .tone-card.locked-by-plan .lock-badge { display: block; }
+
+        /* Colori semantici — allineati alla rainbow-line */
+        .t-polemico { --card-color: #3b82f6; --card-glow: rgba(59, 130, 246, 0.5); }
+        .t-equilibrato { --card-color: #f59e0b; --card-glow: rgba(245, 158, 11, 0.5); }
+        .t-umano { --card-color: #ef4444; --card-glow: rgba(239, 68, 68, 0.5); }
+        .t-gioviale { --card-color: #a855f7; --card-glow: rgba(168, 85, 247, 0.5); }
+        .t-risolutore { --card-color: #ec4899; --card-glow: rgba(236, 72, 153, 0.5); }
+        .t-futurista { --card-color: #06b6d4; --card-glow: rgba(6, 182, 212, 0.5); }
 
         .tone-card.enabled:hover {
-            background: rgba(255, 255, 255, 0.08);
-            transform: translateY(-5px);
-            /* Effetto bagliore sul bordo al passaggio del mouse */
-            box-shadow: 0 0 15px -2px var(--card-color);
-            border-color: var(--card-color);
+            animation: tone-card-blink 1.3s ease-in-out infinite;
+            border-color: var(--card-color) !important;
+            background: rgba(255, 255, 255, 0.035);
         }
 
-        /* --- ICONE CON BAGLIORE --- */
-        .tone-card i.icon-top {
-            font-size: 32px !important;
-            color: var(--text-dim);
-            transition: all 0.3s ease;
+        @keyframes tone-card-blink {
+            0%, 100% {
+                box-shadow: 0 0 0 transparent;
+            }
+            50% {
+                box-shadow: 0 0 14px var(--card-glow), 0 0 28px var(--card-glow);
+            }
         }
 
-        .tone-card.enabled i.icon-top {
-            color: #fff;
-            /* Raggio ampio (20px) e colore molto sfumato (var--glow-color) */
-            /* Usiamo due ombre: una bianca vicina per la brillantezza, una colorata larga per l'aura */
-            filter: drop-shadow(0 0 5px rgba(255,255,255,0.4)) 
-                    drop-shadow(0 0 20px var(--glow-color));
-            
-            transform: scale(1.05); /* Un ingrandimento minimo, quasi impercettibile */
-            opacity: 0.95; /* Evita il bianco puro "sparato" */
-            transition: all 0.5s ease; /* Transizione più lenta per naturalezza */
-        }
-
-        /* Wrapper per centrare meglio */
-        .icon-wrapper {
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 10px;
-        }
-
-        .tone-card.enabled .icon-wrapper {
-            background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-            border-radius: 50%;
-        }
-
-        .tone-card h3 { font-size: 13px; font-weight: 700; color: var(--text-dim); margin: 4px 0; }
+        .tone-card i.icon-top { font-size: 32px; color: var(--text-dim); margin-bottom: 15px; }
+        .tone-card.enabled i.icon-top { color: #fff; filter: drop-shadow(0 0 10px var(--card-color)); }
+        .tone-card h3 { font-size: 13px; font-weight: 700; color: var(--text-dim); }
         .tone-card.enabled h3 { color: #fff; }
 
-        .tone-card.t-polemico { --card-color: #3b82f6; border-left: 5px solid var(--card-color) !important; }
-        .tone-card.t-accademico { --card-color: #10b981; border-left: 5px solid var(--card-color) !important; }
-        .tone-card.t-narrativo { --card-color: #f59e0b; border-left: 5px solid var(--card-color) !important; }
-        .tone-card.t-umano { --card-color: #ef4444; border-left: 5px solid var(--card-color) !important; }
-        .tone-card.t-scherzoso { --card-color: #a855f7; border-left: 5px solid var(--card-color) !important; }
-        .tone-card.t-pragmatico { --card-color: #ec4899; border-left: 5px solid var(--card-color) !important; }
-
-        /* Tooltip */
-        .info-tooltip-container { position: absolute; bottom: 12px; right: 12px; }
-        .info-icon { color: var(--text-dim); font-size: 12px; }
-        .tooltip-text {
-            visibility: hidden; width: 180px; background: #18181b; color: #fff;
-            border: 1px solid #27272a; border-radius: 6px; padding: 10px;
-            position: absolute; bottom: 125%; right: 0; opacity: 0; font-size: 10px;
-            transition: opacity 0.2s; z-index: 100;
-        }
-        .info-tooltip-container:hover .tooltip-text { visibility: visible; opacity: 1; }
-
-        /* Modals */
+        /* --- MODALS --- */
         .modal-overlay { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: rgba(5, 5, 5, 0.9); backdrop-filter: blur(8px); 
             z-index: 9999; display: none; align-items: center; justify-content: center; 
         }
 
-        /* Checklist Styles */
-        .checklist-container {
-            margin-top: 25px;
-            text-align: left;
-            display: inline-block;
-            width: 100%;
-            max-width: 250px;
+        /* Overlay analisi — layer bloccante con prisma olografico centrato */
+        .prism-analysis-overlay {
+            pointer-events: auto;
+            cursor: wait;
         }
-        .check-item {
+
+        .prism-analysis-stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        #analysis-prism-loader {
+            position: relative;
+            top: auto;
+            left: auto;
+            transform: none;
+            display: flex;
+            opacity: 1;
+            z-index: 2;
+            transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        filter 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        #analysis-prism-loader.dissolving {
+            opacity: 0;
+            transform: scale(1.1);
+            filter: blur(10px);
+        }
+
+        #analysis-prism-loader.dissolving .prism-svg,
+        #analysis-prism-loader.dissolving .prism-svg-container {
+            animation: none;
+        }
+
+        #analysis-status-msg {
+            max-width: 380px;
+            text-align: center;
+            line-height: 1.65;
+            padding: 0 12px;
+        }
+
+        .analysis-progress-track {
+            width: 280px;
+            height: 4px;
+            background: #18181b;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 18px;
+            border: 1px solid #27272a;
+        }
+
+        .analysis-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(to right, #3b82f6, #f59e0b, #ef4444, #a855f7, #ec4899, #06b6d4);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+            border-radius: 10px;
+            transition: width 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* --- STICKY FOOTER DEI CREDITI --- */
+        .credits-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(10, 10, 10, 0.9);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid var(--border-grey);
+            padding: 14px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .credits-left-section {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 8px;
-            font-size: 13px;
+            gap: 10px;
+            font-size: 11px;
+            font-weight: 600;
             color: var(--text-dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
         }
-        .check-item span { font-size: 14px; width: 20px; text-align: center; }
 
-        /* Container principale che affianca Textarea e Bottoni */
-        .input-flex-container {
+        .credits-right-section {
             display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            gap: 20px;
-            width: 100%;
-            max-width: 1050px; /* Leggermente più largo per ospitare i bottoni a lato */
-            margin: 0 auto 20px auto;
+            align-items: center;
+            gap: 30px;
         }
 
-        /* La colonna dei bottoni a destra */
-        .side-actions {
+        .credit-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #d4d4d8;
+        }
+
+        .credit-indicator i {
+            font-size: 14px;
+        }
+
+        .credit-val-box {
+            font-weight: 700;
+            background: #18181b;
+            border: 1px solid #27272a;
+            padding: 4px 10px;
+            border-radius: 6px;
+            min-width: 40px;
+            text-align: center;
+            color: #ffffff;
+            transition: all 0.3s ease;
+        }
+
+        /* Stato critico / Crediti esauriti o quasi */
+        .credit-val-box.low-credits {
+            color: #ef4444 !important;
+            border-color: rgba(239, 68, 68, 0.4) !important;
+            background: rgba(239, 68, 68, 0.1) !important;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+            animation: pulse-red-glow 2s infinite;
+        }
+
+        @keyframes pulse-red-glow {
+            0% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.2); }
+            50% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.5); }
+            100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.2); }
+        }
+
+        /* ==========================================================================
+           CONTENITORE MODALE OUTPUT & EFFETTO GLOW / PRISMA 3D VETTORIALE PREMIUM
+           ========================================================================== */
+        
+        .output-modal-box {
+            background: #0d0d0d;
+            border: 1px solid var(--tone-border, var(--border-grey));
+            padding: 35px;
+            border-radius: 12px;
+            width: 750px;
+            max-height: 90vh;
+            /* overflow-y viene ricalcolato via Javascript per eliminare i salti di scrollbar durante la digitazione */
+            overflow-y: hidden;
+            position: relative;
+            z-index: 10;
+            transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.8s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+        }
+
+        /* Ottimizzazione Webkit Scrollbar per prevenire sbalzi strutturali */
+        .output-modal-box::-webkit-scrollbar {
+            width: 5px;
+        }
+        .output-modal-box::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .output-modal-box::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+        }
+        .output-modal-box::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* Bagliore perimetrale — colore del tono selezionato (--tone-* impostati via JS) */
+        .output-modal-box.completed-glow {
+            border-color: var(--tone-border, rgba(168, 85, 247, 0.35));
+            box-shadow: 0 0 30px var(--tone-glow-1, rgba(37, 99, 235, 0.15)),
+                        0 0 50px var(--tone-glow-2, rgba(168, 85, 247, 0.1)),
+                        0 0 70px var(--tone-glow-1, rgba(6, 182, 212, 0.15));
+        }
+
+        /* Modulo di allineamento e posizionamento per prisma e caricamento testuale */
+        .modal-loading-wrapper {
+            position: absolute;
+            top: 55%;
+            left: 50%;
+            transform: translate(-50%, -45%);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 1;
+            transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        filter 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        #tone-gen-prism-loader.dissolving {
+            opacity: 0 !important;
+            transform: translate(-50%, -45%) scale(1.1);
+            filter: blur(10px);
+        }
+
+        #tone-gen-prism-loader.dissolving .prism-svg,
+        #tone-gen-prism-loader.dissolving .prism-svg-container {
+            animation: none;
+        }
+
+        #tone-gen-status-msg {
+            max-width: 380px;
+            text-align: center;
+            line-height: 1.65;
+            padding: 0 12px;
+        }
+
+        .tone-gen-progress-track {
+            width: 280px;
+            height: 4px;
+            background: #18181b;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 18px;
+            border: 1px solid #27272a;
+        }
+
+        .tone-gen-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(to right, #3b82f6, #f59e0b, #ef4444, #a855f7, #ec4899, #06b6d4);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+            border-radius: 10px;
+            transition: width 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Contenitore per l'elemento Prisma vettoriale SVG che esegue l'oscillazione */
+        .prism-svg-container {
+            width: 190px;
+            height: 190px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: float-prism-v 5s ease-in-out infinite; /* Solo oscillazione verticale */
+        }
+
+        /* Elemento SVG che esegue la rotazione vettoriale corretta su asse Z */
+        .prism-svg {
+            width: 100%;
+            height: 100%;
+            animation: spin-prism-v 18s linear infinite; /* Solo rotazione */
+        }
+
+        /* Testo pulsante sottostante */
+        .prism-loading-label {
+            color: var(--text-dim);
+            font-size: 13px;
+            font-weight: 500;
+            margin-top: 15px;
+            letter-spacing: 0.8px;
+            animation: pulse-text 2s ease-in-out infinite;
+        }
+
+        /* Animazioni vettoriali precise */
+        @keyframes spin-prism-v {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes float-prism-v {
+            0%, 100% { transform: translateY(0px) scale(0.96); }
+            50% { transform: translateY(-10px) scale(1.04); }
+        }
+
+        @keyframes pulse-text {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+
+        /* --- Notifica errori globali --- */
+        #global-error-notification {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(239, 68, 68, 0.92);
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 12px 40px;
+            text-align: center;
+            z-index: 99999;
+            display: none;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 4px 20px rgba(239, 68, 68, 0.35);
+            letter-spacing: 0.3px;
+        }
+
+        /* ==========================================================================
+           WORKSPACE SIDEBAR & LAYOUT MODALE A DUE COLONNE
+           ========================================================================== */
+
+        .modal-body-columns {
+            display: flex;
+            position: relative;
+            z-index: 15;
+            min-height: 320px;
+            align-items: flex-start;
+        }
+
+        .modal-content-column {
+            flex: 1;
+            min-width: 0;
+            position: relative;
+        }
+
+        .modal-content-column #modal-tone-title {
+            font-size: 18px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-grey);
+            padding-bottom: 10px;
+            color: #fff;
+            position: relative;
+            z-index: 15;
+        }
+
+        .modal-sidebar-panel {
+            width: 0;
+            opacity: 0;
+            overflow: visible;
+            border-right: 1px solid transparent;
+            margin-right: 0;
+            padding-right: 0;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
             gap: 10px;
-            width: 180px; /* Larghezza fissa per i bottoni */
+            transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                        opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                        margin-right 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                        padding-right 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                        border-color 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            z-index: 25;
         }
 
+        .output-modal-box.completed-glow .modal-sidebar-panel:not(.sidebar-collapsed) {
+            width: 250px;
+            opacity: 1;
+            margin-right: 25px;
+            padding-right: 20px;
+            border-right: 1px solid var(--border-grey);
+        }
+
+        .output-modal-box.completed-glow .modal-sidebar-panel.sidebar-collapsed {
+            width: 0;
+            opacity: 1;
+            margin-right: 0;
+            padding-right: 0;
+            border-right-color: transparent;
+        }
+
+        .modal-sidebar-panel.sidebar-expanded {
+            width: 580px !important;
+            z-index: 30;
+            background: rgba(13, 13, 13, 0.97);
+            box-shadow: 8px 0 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .sidebar-inner-row {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            min-width: 0;
+        }
+
+        .modal-sidebar-panel.sidebar-collapsed .sidebar-inner-row {
+            visibility: hidden;
+        }
+
+        .sidebar-header {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            padding: 4px 0 8px 0;
+            border-bottom: 1px solid var(--border-grey);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+        .sidebar-header i {
+            color: #a855f7;
+            font-size: 13px;
+        }
+
+        .sidebar-toggle-tab {
+            position: absolute;
+            top: 50%;
+            right: -14px;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 52px;
+            background: #18181b;
+            border: 1px solid var(--border-grey);
+            border-left: none;
+            border-radius: 0 6px 6px 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 35;
+            color: var(--text-dim);
+            font-size: 9px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .sidebar-toggle-tab:hover {
+            color: #fff;
+            background: #27272a;
+        }
+        .output-modal-box.completed-glow .sidebar-toggle-tab {
+            display: flex;
+        }
+        .modal-sidebar-panel.sidebar-collapsed .sidebar-toggle-tab {
+            right: -14px;
+        }
+        .modal-sidebar-panel.sidebar-collapsed .sidebar-toggle-tab i {
+            transform: rotate(180deg);
+        }
+
+        .sidebar-tools-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .sidebar-extension-pane {
+            display: none;
+            flex-direction: column;
+            border-left: 1px dashed var(--border-grey);
+            margin-left: 12px;
+            padding-left: 16px;
+            min-width: 0;
+        }
+        .modal-sidebar-panel.sidebar-expanded .sidebar-inner-row {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 0;
+        }
+        .modal-sidebar-panel.sidebar-expanded .sidebar-tools-list {
+            width: 218px;
+            flex-shrink: 0;
+        }
+        .modal-sidebar-panel.sidebar-expanded .sidebar-extension-pane.active {
+            display: flex;
+            flex: 1;
+        }
+
+        .sidebar-extension-close {
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-grey);
+            transition: color 0.2s;
+            white-space: nowrap;
+        }
+        .sidebar-extension-close:hover {
+            color: #fff;
+        }
+
+        .sidebar-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-grey);
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #d4d4d8;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            border-color: #3f3f46;
+        }
+
+        /* Toast verde semitrasparente per conferma copia */
+        .workspace-copy-toast {
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(16, 185, 129, 0.85);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 10px 22px;
+            border-radius: 8px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
+            white-space: nowrap;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+            z-index: 100000;
+        }
+        .workspace-copy-toast.show {
+            opacity: 1;
+        }
+
+        /* Sezioni a fisarmonica (Accordion) */
+        .sidebar-group {
+            border: 1px solid var(--border-grey);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.01);
+            overflow: hidden;
+        }
+
+        .sidebar-group-header {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #d4d4d8;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.3s;
+        }
+        .sidebar-group-header:hover {
+            background: rgba(255, 255, 255, 0.03);
+            color: #fff;
+        }
+        .sidebar-group-header .arrow-indicator {
+            margin-left: auto;
+            font-size: 10px;
+            transition: transform 0.3s;
+            color: var(--text-dim);
+        }
+        .sidebar-group-header .arrow-indicator.open {
+            transform: rotate(180deg);
+            color: #fff;
+        }
+
+        .sidebar-group-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-sub-item {
+            padding: 10px 16px 10px 40px;
+            font-size: 12px;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sidebar-sub-item:hover {
+            background: rgba(255, 255, 255, 0.02);
+            color: #fff;
+        }
+
+        .overlay-platform-pill {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 30px;
+            padding: 4px;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            margin: 12px 0 16px 0;
+        }
+
+        /* Area di testo per le istruzioni chirurgiche */
+        .overlay-textarea {
+            width: 100%;
+            height: 110px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            color: #fff;
+            padding: 12px;
+            font-size: 13px;
+            resize: none;
+            outline: none;
+            margin-top: 10px;
+            transition: border-color 0.3s;
+        }
+        .overlay-textarea:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .overlay-char-counter {
+            text-align: right;
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 4px;
+            transition: color 0.3s;
+        }
+        .overlay-char-counter.low-chars {
+            color: #ef4444 !important;
+            font-weight: 700;
+        }
+
+        .overlay-action-btn {
+            width: 100%;
+            background: var(--accent-blue);
+            color: #fff;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+        .overlay-action-btn:hover {
+            background: #1d4ed8;
+        }
+
+        /* ==========================================================================
+           USER GUIDE — Fumetti onboarding Freemium (user_guide: true)
+           ========================================================================== */
+        .user-guide-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.62);
+            backdrop-filter: blur(3px);
+            z-index: 10001;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.45s;
+        }
+        .user-guide-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .guide-target-highlight {
+            position: relative;
+            z-index: 10002 !important;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.55),
+                        0 0 28px rgba(168, 85, 247, 0.28),
+                        0 0 48px rgba(37, 99, 235, 0.12);
+            border-radius: 8px;
+            transition: box-shadow 0.45s ease;
+        }
+
+        /* Fase 2 guida: textarea resta editabile sopra l'overlay */
+        .guide-textarea-accessible {
+            position: relative;
+            z-index: 10002 !important;
+            pointer-events: auto !important;
+        }
+        .guide-textarea-accessible textarea {
+            pointer-events: auto !important;
+            cursor: text;
+        }
+
+        /* Fase 4: pagina utilizzabile, nessun oscuramento invasivo */
+        .user-guide-overlay.guide-overlay-usable {
+            background: transparent;
+            backdrop-filter: none;
+        }
+
+        .guide-interactive-zone {
+            position: relative;
+            z-index: 10002 !important;
+            pointer-events: auto !important;
+        }
+
+        .user-guide-callout[data-phase="4"] {
+            max-width: 420px;
+        }
+
+        .user-guide-callout {
+            position: fixed;
+            z-index: 10003;
+            max-width: 320px;
+            background: linear-gradient(145deg, #141414 0%, #0d0d0d 100%);
+            border: 1px solid rgba(168, 85, 247, 0.28);
+            border-radius: 12px;
+            padding: 18px 20px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55),
+                        0 0 24px rgba(37, 99, 235, 0.08);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(8px) scale(0.97);
+            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        visibility 0.4s;
+            pointer-events: none;
+        }
+        .user-guide-callout.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+        .user-guide-callout.has-actions {
+            pointer-events: auto;
+        }
+
+        .user-guide-callout-arrow {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #0d0d0d;
+            border-left: 1px solid rgba(168, 85, 247, 0.28);
+            border-top: 1px solid rgba(168, 85, 247, 0.28);
+            transform: rotate(45deg);
+        }
+        .user-guide-callout[data-placement="bottom"] .user-guide-callout-arrow {
+            top: -7px; left: 50%; margin-left: -6px;
+        }
+        .user-guide-callout[data-placement="top"] .user-guide-callout-arrow {
+            bottom: -7px; left: 28px;
+            transform: rotate(225deg);
+        }
+        .user-guide-callout[data-placement="left"] .user-guide-callout-arrow {
+            right: -7px; top: 24px;
+            transform: rotate(135deg);
+        }
+        .user-guide-callout[data-placement="right"] .user-guide-callout-arrow {
+            left: -7px; top: 24px;
+            transform: rotate(-45deg);
+        }
+
+        .user-guide-callout-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #a855f7;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .user-guide-callout-label i {
+            font-size: 11px;
+        }
+
+        .user-guide-callout-text {
+            font-size: 13px;
+            line-height: 1.65;
+            color: #d4d4d8;
+            font-weight: 400;
+        }
+
+        .user-guide-callout-actions {
+            display: none;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .user-guide-callout.has-actions .user-guide-callout-actions {
+            display: flex;
+        }
+
+        .guide-btn-cancel {
+            flex: 1;
+            background: transparent;
+            border: 1px solid var(--border-grey);
+            color: var(--text-dim);
+            padding: 9px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.25s;
+        }
+        .guide-btn-cancel:hover {
+            border-color: #52525b;
+            color: #fff;
+        }
+
+        .guide-btn-confirm {
+            flex: 1;
+            background: var(--accent-blue);
+            border: none;
+            color: #fff;
+            padding: 9px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: background 0.25s;
+        }
+        .guide-btn-confirm:hover {
+            background: #1d4ed8;
+        }
     </style>
 </head>
 <body>
+
+<div id="global-error-notification"></div>
+<div id="workspace-copy-toast" class="workspace-copy-toast">Contenuto copiato correttamente</div>
+
+<!-- User Guide onboarding Freemium -->
+<div id="user-guide-overlay" class="user-guide-overlay"></div>
+<div id="user-guide-callout" class="user-guide-callout" data-placement="bottom">
+    <div class="user-guide-callout-arrow"></div>
+    <div class="user-guide-callout-label"><i class="fas fa-compass"></i> Guida PRISM</div>
+    <p id="user-guide-callout-text" class="user-guide-callout-text"></p>
+    <div class="user-guide-callout-actions">
+        <button type="button" class="guide-btn-cancel" id="guide-btn-cancel">Annulla</button>
+        <button type="button" class="guide-btn-confirm" id="guide-btn-confirm">Ho capito</button>
+    </div>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -352,148 +1036,341 @@
 <script src="/firebase-config.js"></script>
 
 <script>
-    window.location.href = "/";
     const currentEnv = "<%= env %>";
     if (typeof initFirebaseConfig === 'function') {
         initFirebaseConfig(currentEnv);
         firebase.initializeApp(window.FIREBASE_ENV);
         window.db = firebase.firestore();
     }
-
-    function handleLogout() {
-        firebase.auth().signOut().then(() => { window.location.href = "/login"; });
-    }
+    function handleLogout() { firebase.auth().signOut().then(() => { window.location.href = "/login"; }); }
 </script>
 
-<header style="display: flex; justify-content: space-between; align-items: center; padding: 0px 0; margin-bottom: 5px;">
-    <div style="display: flex; align-items: center; margin-left: -5px;">
-        <!-- Logo a 110px: una via di mezzo perfetta -->
-        <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo" style="width: 110px; height: auto; display: block;">
-    </div>
-    
-    <div class="nav-right" style="display: flex; gap: 20px; font-size: 13px; align-items: center;">
-        <span style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-dim);">
-            <i class="fas fa-search" style="font-size: 14px;"></i> Archivio
-        </span>
-        <span style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-dim);">
-            <i class="fas fa-cog" style="font-size: 14px;"></i> Impostazioni
-        </span>
-        <span onclick="handleLogout()" style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ef4444; font-weight: 600;">
-            <i class="fas fa-sign-out-alt"></i> Logout
-        </span>
+<header>
+    <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo" style="width: 110px; height: auto;">
+    <div class="nav-right">
+        <span><i class="fas fa-search"></i> Archivio</span>
+        <span><i class="fas fa-cog"></i> Impostazioni</span>
+        <span onclick="handleLogout()" style="color: #ef4444; font-weight: 600;"><i class="fas fa-sign-out-alt"></i> Logout</span>
     </div>
 </header>
 
-<!-- AREA INPUT + BOTTONI LATERALI -->
 <div class="input-flex-container">
     <div class="input-box">
         <div class="rainbow-line"></div>
-        <textarea id="topicInput" maxlength="200" placeholder="Di cosa vuoi parlare oggi?"></textarea>
-        <div class="input-info">
-            <span id="charCounter">200 / 200</span>
-        </div>
+        <textarea id="topicInput" maxlength="200" placeholder="Di cosa vogliamo parlare? Almeno 5 parole per attivare PRISM..."></textarea>
+        <div class="input-info"><span id="charCounter">200 / 200</span></div>
     </div>
 
-    <!-- Colonna Bottoni a Destra -->
     <div class="side-actions">
-        <button class="generate-btn" onclick="generateHumanPost()">
-            Analizza <i class="fas fa-bolt" style="margin-left: 5px;"></i>
-        </button>
-        <button class="reset-btn" onclick="fullReset()">
-            <i class="fas fa-trash-alt"></i> Pulisci Tutto
+        <button class="generate-btn" id="mainGenBtn" disabled onclick="generateHumanPost()">Analizza <i class="fas fa-bolt"></i></button>
+        <!-- BOTTONE PULISCI CON FUNZIONE fullReset -->
+        <button class="reset-btn" id="mainResetBtn" disabled onclick="fullReset()">
+            <i class="fas fa-trash-alt"></i> PULISCI
         </button>
     </div>
 </div>
 
-<!-- IMPOSTAZIONI CENTRATE -->
-<div class="settings-row" style="display: flex; justify-content: center; align-items: center; gap: 40px; margin-bottom: 30px;">
-    <div class="setting-group" style="display: flex; align-items: center; gap: 12px;">
-        <span class="setting-label" style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Canale Social</span>
-        <div class="platform-pill">
-            <div class="pill" onclick="selP(this)"><i class="fab fa-facebook"></i> Facebook</div>
-            <div class="pill active" onclick="selP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
-            <div class="pill" onclick="selP(this)">X</div>
-        </div>
+<div class="settings-row" id="settingsRow">
+    <div class="platform-pill">
+        <div class="pill" onclick="selP(this)"><i class="fab fa-facebook"></i> Facebook</div>
+        <div class="pill active" onclick="selP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
+        <div class="pill" onclick="selP(this)">X</div>
     </div>
-
-    <div class="setting-group" style="display: flex; align-items: center; gap: 12px;">
-        <span class="setting-label" style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Lingua</span>
-        <div class="lang-select" style="padding: 8px 15px; border-radius: 20px;">
-            🇮🇹 Italiano
-        </div>
-    </div>
+    <div class="lang-select">🇮🇹 Italiano</div>
 </div>
 
-<!-- Tones Grid: Gli onclick ora chiamano selectToneCard -->
 <div class="tones-grid">
-    <div class="tone-card t-polemico" data-type="polemico" id="card-polemico" onclick="selectToneCard('polemico')">
+    <div class="tone-card t-polemico" data-key="polemico" onclick="selectToneCard('polemico')">
+        <i class="fas fa-lock lock-badge"></i>
         <div class="icon-wrapper"><i class="fas fa-gavel icon-top"></i></div>
-        <h3>Distaccato / Polemico</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Smonta la narrativa mainstream con i dati nudi.</span></div>
+        <h3>Polemico</h3>
     </div>
-    
-    <div class="tone-card t-accademico" data-type="accademico" id="card-accademico" onclick="selectToneCard('accademico')">
-        <div class="icon-wrapper"><i class="fas fa-graduation-cap icon-top"></i></div>
-        <h3>Professionale / Accademico</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Costruisci autorità con precisione tecnica.</span></div>
-    </div>
-
-    <div class="tone-card t-narrativo" data-type="equilibrato" id="card-equilibrato" onclick="selectToneCard('equilibrato')">
+    <div class="tone-card t-equilibrato" data-key="equilibrato" onclick="selectToneCard('equilibrato')">
+        <i class="fas fa-lock lock-badge"></i>
         <div class="icon-wrapper"><i class="fas fa-pen-nib icon-top"></i></div>
-        <h3>Equilibrato / Narrativo</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Divulga con chiarezza e stile editoriale.</span></div>
+        <h3>Narrativo</h3>
     </div>
-
-    <div class="tone-card t-umano" data-type="umano" id="card-umano" onclick="selectToneCard('umano')">
+    <div class="tone-card t-umano" data-key="umano" onclick="selectToneCard('umano')">
+        <i class="fas fa-lock lock-badge"></i>
         <div class="icon-wrapper"><i class="fas fa-heart icon-top"></i></div>
-        <h3>Umano / Empatico</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Connettiti emotivamente con il tuo pubblico.</span></div>
+        <h3>Umano</h3>
     </div>
-
-    <div class="tone-card t-scherzoso" data-type="scherzoso" id="card-scherzoso" onclick="selectToneCard('scherzoso')">
+    <div class="tone-card t-gioviale" data-key="gioviale" onclick="selectToneCard('gioviale')">
+        <i class="fas fa-lock lock-badge"></i>
         <div class="icon-wrapper"><i class="fas fa-theater-masks icon-top"></i></div>
-        <h3>Gioviale / Scherzoso</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Intrattieni e rendi digeribili temi complessi.</span></div>
+        <h3>Scherzoso</h3>
     </div>
-
-    <div class="tone-card t-pragmatico" data-type="pragmatico" id="card-pragmatico" onclick="selectToneCard('pragmatico')">
+    <div class="tone-card t-risolutore" data-key="risolutore" onclick="selectToneCard('risolutore')">
+        <i class="fas fa-lock lock-badge"></i>
         <div class="icon-wrapper"><i class="fas fa-tools icon-top"></i></div>
-        <h3>Risolutore / Pragmatico</h3>
-        <div class="info-tooltip-container"><i class="fas fa-info-circle info-icon"></i><span class="tooltip-text">Focus su soluzioni pratiche e how-to.</span></div>
+        <h3>Pragmatico</h3>
+    </div>
+    <div class="tone-card t-futurista" data-key="futurista" onclick="selectToneCard('futurista')">
+        <i class="fas fa-lock lock-badge"></i>
+        <div class="icon-wrapper"><i class="fas fa-rocket icon-top"></i></div>
+        <h3>Futurista</h3>
     </div>
 </div>
 
-<!-- Modal di caricamento con Checklist -->
-<div id="prism-modal" class="modal-overlay">
-    <div style="background: #111; border: 1px solid var(--border-grey); padding: 40px; border-radius: 12px; width: 450px; text-align: center;">
-        <div style="margin-bottom: 20px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 32px; color: var(--accent-blue);"></i></div>
-        <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 5px;">Pipeline PRISM</h2>
-        <div id="status-msg" style="font-size: 13px; color: var(--text-dim); margin-bottom: 20px;">Inizializzazione...</div>
-        
-        <div style="width: 100%; background: #18181b; border-radius: 10px; overflow: hidden; height: 6px;">
-            <div id="p-bar" style="height: 100%; width: 0%; background: var(--accent-blue); transition: width 0.4s;"></div>
-        </div>
-
-        <div class="checklist-container">
-            <div class="check-item"><span id="check-shaping">⚪</span> Shaping Strategico</div>
-            <div class="check-item"><span id="check-search">⚪</span> Ricerca Web Profonda</div>
-            <div class="check-item"><span id="check-refiner">⚪</span> Raffinamento Analitico</div>
+<!-- Modal Analisi — Prisma olografico unificato (stesso asset della generazione toni) -->
+<div id="prism-modal" class="modal-overlay prism-analysis-overlay">
+    <div class="prism-analysis-stage">
+        <div class="modal-loading-wrapper" id="analysis-prism-loader">
+            <div class="prism-svg-container">
+                <svg class="prism-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <defs>
+                        <filter id="analysis-prism-neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+                            <feGaussianBlur stdDeviation="4.5" result="blur" />
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                        <filter id="analysis-deep-blur-aura">
+                            <feGaussianBlur stdDeviation="15" />
+                        </filter>
+                        <radialGradient id="analysis-internal-aura" cx="50%" cy="50%" r="52%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.55"/>
+                            <stop offset="18%" stop-color="#f59e0b" stop-opacity="0.45"/>
+                            <stop offset="36%" stop-color="#ef4444" stop-opacity="0.4"/>
+                            <stop offset="54%" stop-color="#a855f7" stop-opacity="0.42"/>
+                            <stop offset="72%" stop-color="#ec4899" stop-opacity="0.38"/>
+                            <stop offset="90%" stop-color="#06b6d4" stop-opacity="0.3"/>
+                            <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+                        </radialGradient>
+                        <linearGradient id="analysis-face-red-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.55"/>
+                            <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.18"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-face-purple-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#ef4444" stop-opacity="0.52"/>
+                            <stop offset="100%" stop-color="#a855f7" stop-opacity="0.16"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-face-blue-cyan" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" stop-opacity="0.52"/>
+                            <stop offset="100%" stop-color="#ec4899" stop-opacity="0.16"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-face-orange-amber" x1="0%" y1="100%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.5"/>
+                            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.14"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-neon-warm" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#f59e0b" stop-opacity="1"/>
+                            <stop offset="50%" stop-color="#ef4444" stop-opacity="1"/>
+                            <stop offset="100%" stop-color="#ec4899" stop-opacity="0.85"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-neon-cool" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="1"/>
+                            <stop offset="50%" stop-color="#06b6d4" stop-opacity="1"/>
+                            <stop offset="100%" stop-color="#a855f7" stop-opacity="0.85"/>
+                        </linearGradient>
+                        <linearGradient id="analysis-rainbow-equator" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#3b82f6"/>
+                            <stop offset="20%" stop-color="#f59e0b"/>
+                            <stop offset="40%" stop-color="#ef4444"/>
+                            <stop offset="60%" stop-color="#a855f7"/>
+                            <stop offset="80%" stop-color="#ec4899"/>
+                            <stop offset="100%" stop-color="#06b6d4"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="100" cy="100" r="70" fill="url(#analysis-internal-aura)" filter="url(#analysis-deep-blur-aura)" />
+                    <polygon points="100,30 45,100 100,85" fill="url(#analysis-face-red-pink)" stroke="url(#analysis-neon-warm)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,30 155,100 100,85" fill="url(#analysis-face-purple-pink)" stroke="url(#analysis-neon-cool)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,170 45,100 100,85" fill="url(#analysis-face-blue-cyan)" stroke="url(#analysis-neon-cool)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,170 155,100 100,85" fill="url(#analysis-face-orange-amber)" stroke="url(#analysis-neon-warm)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,30 45,100 100,110" fill="url(#analysis-face-red-pink)" stroke="url(#analysis-neon-warm)" stroke-width="1.5" filter="url(#analysis-prism-neon-glow)"/>
+                    <polygon points="100,30 155,100 100,110" fill="url(#analysis-face-blue-cyan)" stroke="url(#analysis-neon-cool)" stroke-width="1.5" filter="url(#analysis-prism-neon-glow)"/>
+                    <polygon points="100,170 45,100 100,110" fill="url(#analysis-face-purple-pink)" stroke="url(#analysis-neon-cool)" stroke-width="1.5"/>
+                    <polygon points="100,170 155,100 100,110" fill="url(#analysis-face-orange-amber)" stroke="url(#analysis-neon-warm)" stroke-width="1.5"/>
+                    <polygon points="45,100 100,110 155,100 100,85" fill="none" stroke="url(#analysis-rainbow-equator)" stroke-opacity="0.75" stroke-width="1"/>
+                </svg>
+            </div>
+            <div class="prism-loading-label" id="analysis-status-msg">Preparazione analisi...</div>
+            <div class="analysis-progress-track" aria-hidden="true">
+                <div class="analysis-progress-fill" id="analysis-progress-fill"></div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Modal Output -->
+<!-- Modal Output Con Design Premium, Prisma 3D Vettoriale SVG e Glow Spettrale -->
 <div id="output-modal" class="modal-overlay" onclick="closeToneModal()">
-    <div style="background: #111; border: 1px solid var(--border-grey); border-left: 5px solid var(--accent-blue); padding: 35px; border-radius: 12px; width: 750px; max-height: 90vh; overflow-y: auto; position: relative;" onclick="event.stopPropagation()">
-        <span onclick="closeToneModal()" style="position: absolute; top: 20px; right: 25px; color: var(--text-dim); cursor: pointer; font-size: 20px;"><i class="fas fa-times"></i></span>
-        <h2 id="modal-tone-title" style="font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 20px; border-bottom: 1px solid var(--border-grey); padding-bottom: 10px;">Output</h2>
-        
-        <div id="modal-tone-text" style="line-height: 1.8; font-size: 15px; color: #e4e4e7;"></div>
+    <div class="output-modal-box" id="output-modal-box" onclick="event.stopPropagation()">
+        <span onclick="closeToneModal()" style="position: absolute; top: 20px; right: 25px; color: var(--text-dim); cursor: pointer; font-size: 20px; z-index: 100;"><i class="fas fa-times"></i></span>
 
-        <!-- Sezione rigenerazione omessa per pulizia, rimane come nel tuo originale -->
+        <div class="modal-body-columns">
+            <!-- SEZIONE SINISTRA: Workspace Sidebar -->
+            <div id="modal-sidebar" class="modal-sidebar-panel">
+                <div class="sidebar-toggle-tab" id="sidebar-toggle-tab" onclick="toggleSidebarCollapse()" title="Collassa/Espandi sidebar">
+                    <i class="fas fa-chevron-left" id="sidebar-toggle-icon"></i>
+                </div>
+
+                <div class="sidebar-inner-row">
+                    <div class="sidebar-tools-list">
+                        <div class="sidebar-header"><i class="fas fa-tools"></i> Workspace</div>
+
+                        <div class="sidebar-item" onclick="copyModalText()">
+                            <i class="far fa-copy"></i>
+                            <span>Copia testo</span>
+                        </div>
+
+                        <div class="sidebar-group">
+                            <div class="sidebar-group-header" onclick="toggleSidebarGroup('regen-options')">
+                                <i class="fas fa-sync-alt"></i>
+                                <span>Rigenerazione</span>
+                                <i class="fas fa-chevron-down arrow-indicator" id="arrow-regen-options"></i>
+                            </div>
+                            <div class="sidebar-group-content" id="regen-options">
+                                <div class="sidebar-sub-item" onclick="openSidebarExtension('total-regen')">
+                                    <i class="fas fa-globe"></i> Rigenerazione totale
+                                </div>
+                                <div class="sidebar-sub-item" onclick="openSidebarExtension('instructions-regen')">
+                                    <i class="fas fa-comment-alt"></i> Con istruzioni
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="sidebar-item" onclick="openSidebarExtension('compare-versions')">
+                            <i class="fas fa-columns"></i>
+                            <span>Confronta versioni</span>
+                        </div>
+                    </div>
+
+                    <div class="sidebar-extension-pane" id="sidebar-extension-pane">
+                        <span class="sidebar-extension-close" onclick="closeSidebarExtension()">
+                            <i class="fas fa-times"></i> Chiudi
+                        </span>
+                        <div id="sidebar-extension-body" style="color: #e4e4e7; font-size: 13px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SEZIONE DESTRA: Titolo + Contenuto del Tono -->
+            <div class="modal-content-column">
+                <h2 id="modal-tone-title"></h2>
+                <div id="modal-tone-text" style="line-height: 1.8; color: #e4e4e7; font-size: 15px; white-space: pre-wrap;"></div>
+                <div id="modal-tone-assets"></div>
+            </div>
+        </div>
+
+        <!-- SPINNER F4 — Prisma generazione tono (dissolve quando status → completed) -->
+        <div class="modal-loading-wrapper" id="tone-gen-prism-loader">
+            <div class="prism-svg-container">
+                <svg class="prism-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <!-- Filtro per emanazione bagliore olografico spettrale -->
+                        <filter id="prism-neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+                            <feGaussianBlur stdDeviation="4.5" result="blur" />
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                        <!-- Filtro sfocatura profonda per alone spettrale di fondo -->
+                        <filter id="deep-blur-aura">
+                            <feGaussianBlur stdDeviation="15" />
+                        </filter>
+
+                        <!-- Alone interno — palette rainbow-line (#3b82f6 → #06b6d4) -->
+                        <radialGradient id="internal-aura" cx="50%" cy="50%" r="52%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.55"/>
+                            <stop offset="18%" stop-color="#f59e0b" stop-opacity="0.45"/>
+                            <stop offset="36%" stop-color="#ef4444" stop-opacity="0.4"/>
+                            <stop offset="54%" stop-color="#a855f7" stop-opacity="0.42"/>
+                            <stop offset="72%" stop-color="#ec4899" stop-opacity="0.38"/>
+                            <stop offset="90%" stop-color="#06b6d4" stop-opacity="0.3"/>
+                            <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+                        </radialGradient>
+
+                        <linearGradient id="face-spectrum-red-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.55"/>
+                            <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.18"/>
+                        </linearGradient>
+                        <linearGradient id="face-spectrum-purple-pink" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#ef4444" stop-opacity="0.52"/>
+                            <stop offset="100%" stop-color="#a855f7" stop-opacity="0.16"/>
+                        </linearGradient>
+                        <linearGradient id="face-spectrum-blue-cyan" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" stop-opacity="0.52"/>
+                            <stop offset="100%" stop-color="#ec4899" stop-opacity="0.16"/>
+                        </linearGradient>
+                        <linearGradient id="face-spectrum-orange-amber" x1="0%" y1="100%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.5"/>
+                            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.14"/>
+                        </linearGradient>
+
+                        <linearGradient id="neon-edge-warm" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#f59e0b" stop-opacity="1"/>
+                            <stop offset="50%" stop-color="#ef4444" stop-opacity="1"/>
+                            <stop offset="100%" stop-color="#ec4899" stop-opacity="0.85"/>
+                        </linearGradient>
+                        <linearGradient id="neon-edge-cool" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" stop-opacity="1"/>
+                            <stop offset="50%" stop-color="#06b6d4" stop-opacity="1"/>
+                            <stop offset="100%" stop-color="#a855f7" stop-opacity="0.85"/>
+                        </linearGradient>
+                        <linearGradient id="rainbow-equator" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#3b82f6"/>
+                            <stop offset="20%" stop-color="#f59e0b"/>
+                            <stop offset="40%" stop-color="#ef4444"/>
+                            <stop offset="60%" stop-color="#a855f7"/>
+                            <stop offset="80%" stop-color="#ec4899"/>
+                            <stop offset="100%" stop-color="#06b6d4"/>
+                        </linearGradient>
+                    </defs>
+
+                    <!-- Alone di luce diffusa olografica sul fondo del prisma -->
+                    <circle cx="100" cy="100" r="70" fill="url(#internal-aura)" filter="url(#deep-blur-aura)" />
+
+                    <!-- STRUTTURA CRISTALLINA TRIDIDIMENSIONALE (OTTAEDRO PROIETTATO) -->
+                    <!-- 1. Facce Posteriori (Opacità calibrata per simulare trasparenza e rifrazione interna) -->
+                    <polygon points="100,30 45,100 100,85" fill="url(#face-spectrum-red-pink)" stroke="url(#neon-edge-warm)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,30 155,100 100,85" fill="url(#face-spectrum-purple-pink)" stroke="url(#neon-edge-cool)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,170 45,100 100,85" fill="url(#face-spectrum-blue-cyan)" stroke="url(#neon-edge-cool)" stroke-opacity="0.3" stroke-width="0.6"/>
+                    <polygon points="100,170 155,100 100,85" fill="url(#face-spectrum-orange-amber)" stroke="url(#neon-edge-warm)" stroke-opacity="0.3" stroke-width="0.6"/>
+
+                    <!-- 2. Facce Anteriori (Superfici sature ad alta definizione illuminate da un filtro di glow spettrale) -->
+                    <polygon points="100,30 45,100 100,110" fill="url(#face-spectrum-red-pink)" stroke="url(#neon-edge-warm)" stroke-width="1.5" filter="url(#prism-neon-glow)"/>
+                    <polygon points="100,30 155,100 100,110" fill="url(#face-spectrum-blue-cyan)" stroke="url(#neon-edge-cool)" stroke-width="1.5" filter="url(#prism-neon-glow)"/>
+                    <polygon points="100,170 45,100 100,110" fill="url(#face-spectrum-purple-pink)" stroke="url(#neon-edge-cool)" stroke-width="1.5"/>
+                    <polygon points="100,170 155,100 100,110" fill="url(#face-spectrum-orange-amber)" stroke="url(#neon-edge-warm)" stroke-width="1.5"/>
+
+                    <!-- 3. Linee di giunzione equatoriale (Struttura interna del prisma) -->
+                    <polygon points="45,100 100,110 155,100 100,85" fill="none" stroke="url(#rainbow-equator)" stroke-opacity="0.75" stroke-width="1"/>
+                </svg>
+            </div>
+            <!-- Testo di caricamento integrato (F4 — workerState.currentStep) -->
+            <div class="prism-loading-label" id="tone-gen-status-msg">Generazione del contenuto in corso...</div>
+            <div class="tone-gen-progress-track" aria-hidden="true">
+                <div class="tone-gen-progress-fill" id="tone-gen-progress-fill"></div>
+            </div>
+        </div>
     </div>
 </div>
+
+<!-- Sticky Footer per il Monitoraggio dei Crediti Rimanenti dell'Azienda -->
+<footer class="credits-footer">
+    <div class="credits-left-section">
+        <i class="fas fa-shield-alt"></i> Piano Aziendale Attivo
+    </div>
+    <div class="credits-right-section">
+        <!-- Indicatore delle Generazioni Rimanenti -->
+        <div class="credit-indicator">
+            <i class="fas fa-magic" style="color: var(--accent-blue);"></i>
+            <span>Analisi / Generazioni:</span>
+            <div id="credits-generations" class="credit-val-box">--</div>
+        </div>
+        <!-- Indicatore delle Rigenerazioni Rimanenti -->
+        <div class="credit-indicator">
+            <i class="fas fa-redo" style="color: #a855f7;"></i>
+            <span>Rigenerazioni Tono:</span>
+            <div id="credits-regenerations" class="credit-val-box">--</div>
+        </div>
+    </div>
+</footer>
 
 <script src="/dashboard.js"></script>
 </body>
 </html>
+
+<!-- END OF FILE dashboard.ejs -->

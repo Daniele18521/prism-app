@@ -39,6 +39,10 @@ app.get('/login', (req, res) => {
   });
 });
 
+app.get('/archive', (req, res) => {
+  res.render('archive', { env: process.env.NODE_ENV || 'development' });
+});
+
 /**
  * 🛠️ 4. Rotta Dashboard
  * Il "laboratorio" di PRISM.

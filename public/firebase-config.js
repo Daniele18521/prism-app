@@ -8,12 +8,12 @@ function initFirebaseConfig(currentEnv) {
     
     // 💻 CONFIGURAZIONE: SVILUPPO & TEST
     const configDev = {
-        apiKey: "AIzaSyBXaiMXbcZVj0D4P2fwAxLm6aHNdkdqAiw",
-        authDomain: "prism-2184d.firebaseapp.com",
-        projectId: "prism-2184d",
-        storageBucket: "prism-2184d.firebasestorage.app",
-        messagingSenderId: "652708198292",
-        appId: "1:652708198292:web:66f84fcf27a4d118784181",
+        apiKey: "AIzaSyBT1qFk4QLttZcKRP42KCAjSXCR-gF5vnc",
+        authDomain: "prism-test-e04b1.firebaseapp.com",
+        projectId: "prism-test-e04b1",
+        storageBucket: "prism-test-e04b1.firebasestorage.app",
+        messagingSenderId: "987209405034",
+        appId: "1:987209405034:web:b2efeddea5ce841cec7013",
         // 🟢 AGGIUNTO: URL del backend locale per lo sviluppo
         backendUrl: "http://localhost:3001" 
     };
