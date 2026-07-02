@@ -169,6 +169,7 @@
 
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="/prism-error-popup.js"></script>
     <script src="/firebase-config.js"></script>
 
     <script>
@@ -187,7 +188,9 @@
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
             if (!email || !emailRegex.test(email)) {
-                alert("Inserisci un indirizzo email valido.");
+                if (typeof window.showPrismError === 'function') {
+                    showPrismError('Inserisci un indirizzo email valido.');
+                }
                 return;
             }
 
@@ -207,7 +210,9 @@
                 successMsg.style.display = 'block';
             } catch (error) {
                 console.error(error);
-                alert("Errore. Riprova tra poco.");
+                if (typeof window.showPrismError === 'function') {
+                    showPrismError('Errore. Riprova tra poco.');
+                }
                 btn.disabled = false;
                 btn.innerText = "ACCEDI";
             }

@@ -139,6 +139,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
+    <script src="/prism-error-popup.js"></script>
     <script src="/firebase-config.js"></script>
     <script>
         // Inizializziamo la configurazione client-side di Firebase passando la variabile d'ambiente
@@ -152,12 +153,17 @@
             const urlParams = new URLSearchParams(window.location.search);
             // Se l'URL riporta un errore dovuto a un profilo non trovato su Firestore
             if (urlParams.get('error') === 'profile_not_found') {
-                // Invochiamo l'helper per mostrare la notifica d'errore all'utente
-                showAlert("error", "Profilo non registrato su Firestore.");
-            // Se invece l'URL riporta l'assenza di una Company associata all'utenza
+                if (typeof window.showPrismError === 'function') {
+                    showPrismError('Profilo non registrato su Firestore.', { title: 'Accesso non riuscito' });
+                } else {
+                    showAlert("error", "Profilo non registrato su Firestore.");
+                }
             } else if (urlParams.get('error') === 'no_company_assigned') {
-                // Mostriamo il messaggio di errore per informare della mancata associazione aziendale
-                showAlert("error", "Nessun cluster aziendale associato a questa utenza.");
+                if (typeof window.showPrismError === 'function') {
+                    showPrismError('Nessun cluster aziendale associato a questa utenza.', { title: 'Accesso non riuscito' });
+                } else {
+                    showAlert("error", "Nessun cluster aziendale associato a questa utenza.");
+                }
             }
         });
 
@@ -216,12 +222,12 @@
                         subscriptionStatus: "free",               // Impostiamo lo stato iniziale
                         tier: "free",                             // Definiamo il livello di servizio iniziale
                         enabled_tones: [                          // Abilitiamo l'array dei toni base gratuiti
-                            "umano", 
-                            "gioviale",
-                            "risolutore",
-                            "futurista",
-                            "equilibrato",
-                            "polemico",
+                            "provocatore", 
+                            "confidente",
+                            "sferzante",
+                            "visionario",
+                            "metodologico",
+                            "narratore",
                         ],
                         generations_left: 10,                     // Impostiamo il limite iniziale di 50 analisi
                         regenerations_left: 5,                  // Impostiamo il limite iniziale di 100 rigenerazioni
@@ -255,7 +261,11 @@
                 // Intercettiamo eventuali eccezioni ripristinando lo stato del pulsante
                 btn.disabled = false;
                 // Mostriamo la notifica con l'errore descrittivo generato durante il login
-                showAlert("error", `Errore Google Sign-In: ${error.message}`);
+                if (typeof window.showPrismError === 'function') {
+                    showPrismError(`Errore Google Sign-In: ${error.message}`, { title: 'Accesso non riuscito' });
+                } else {
+                    showAlert("error", `Errore Google Sign-In: ${error.message}`);
+                }
             }
         }
     </script>

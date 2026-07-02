@@ -15,7 +15,12 @@ async function fetchArchive() {
     const dateTo = document.getElementById('dateTo').value;
     const resultsContainer = document.getElementById('results-container');
 
-    if (!dateFrom || !dateTo) return alert("Seleziona un intervallo di date.");
+    if (!dateFrom || !dateTo) {
+        if (typeof window.showPrismError === 'function') {
+            return window.showPrismError('Seleziona un intervallo di date.');
+        }
+        return;
+    }
 
     resultsContainer.innerHTML = "<p style='text-align:center; color:var(--text-dim)'>⚡ Interrogazione spettro in corso...</p>";
 
@@ -43,6 +48,9 @@ async function fetchArchive() {
     } catch (error) {
         console.error("Errore ricerca:", error);
         resultsContainer.innerHTML = "<p style='color:#ef4444'>Errore nel recupero dati.</p>";
+        if (typeof window.showPrismError === 'function') {
+            window.showPrismError('Errore nel recupero dati dall\'archivio. Riprova.');
+        }
     }
 }
 
@@ -165,7 +173,9 @@ window.toggleCompareSelection = function(checkbox, docId, toneKey, version) {
     if (selectedForComparison.length > 2) {
         checkbox.checked = false;
         selectedForComparison.pop();
-        alert("Puoi confrontare solo 2 versioni alla volta.");
+        if (typeof window.showPrismError === 'function') {
+            window.showPrismError('Puoi confrontare solo 2 versioni alla volta.');
+        }
     }
 };
 

@@ -71,12 +71,72 @@ const charCounterDisplay = document.getElementById('charCounter');
 const btnGenerate = document.querySelector('.generate-btn');
 const btnReset = document.querySelector('.reset-btn');
 const settingsRow = document.querySelector('.settings-row');
-const maxCharacterLength = 200;
+const maxCharacterLength = 2000;
 const MIN_WORDS_FOR_ANALYZE = 5;
+const CHAR_COUNTER_WARN_THRESHOLD = 100;
+let inputUnlockedByPaste = false;
 
 function countInputWords(text) {
     const trimmed = (text || '').trim();
     return trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+}
+
+function isTopicReadyForAnalyze(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed || analysisCompleted) return false;
+    if (inputUnlockedByPaste) return true;
+    return countInputWords(text) >= MIN_WORDS_FOR_ANALYZE;
+}
+
+function updateTopicCharCounter() {
+    if (!charCounterDisplay) return;
+    const currentLength = topicInputTextarea ? topicInputTextarea.value.length : 0;
+    const remaining = Math.max(0, maxCharacterLength - currentLength);
+    charCounterDisplay.textContent = `${remaining} / ${maxCharacterLength}`;
+    charCounterDisplay.style.color = remaining <= CHAR_COUNTER_WARN_THRESHOLD ? '#ef4444' : 'var(--text-dim)';
+}
+
+function enforceTopicMaxLength(preferredInsertLength) {
+    if (!topicInputTextarea) return { truncated: false, value: '' };
+
+    if (typeof preferredInsertLength === 'number' && preferredInsertLength > maxCharacterLength) {
+        return { truncated: true, value: topicInputTextarea.value.slice(0, maxCharacterLength) };
+    }
+
+    if (topicInputTextarea.value.length > maxCharacterLength) {
+        return { truncated: true, value: topicInputTextarea.value.slice(0, maxCharacterLength) };
+    }
+
+    return { truncated: false, value: topicInputTextarea.value };
+}
+
+function handleTopicPaste(event) {
+    if (!topicInputTextarea || analysisCompleted) return;
+
+    const pastedText = event.clipboardData?.getData('text') || '';
+    if (!pastedText) return;
+
+    const selectionStart = topicInputTextarea.selectionStart ?? topicInputTextarea.value.length;
+    const selectionEnd = topicInputTextarea.selectionEnd ?? topicInputTextarea.value.length;
+    const currentValue = topicInputTextarea.value;
+    const nextValue = currentValue.slice(0, selectionStart) + pastedText + currentValue.slice(selectionEnd);
+
+    if (nextValue.length > maxCharacterLength) {
+        event.preventDefault();
+        const allowedLength = maxCharacterLength - (currentValue.length - (selectionEnd - selectionStart));
+        const truncatedPaste = allowedLength > 0 ? pastedText.slice(0, allowedLength) : '';
+        topicInputTextarea.value = currentValue.slice(0, selectionStart) + truncatedPaste + currentValue.slice(selectionEnd);
+        inputUnlockedByPaste = truncatedPaste.trim().length > 0;
+        updateTopicCharCounter();
+        handleInputTrigger({ fromPaste: true });
+        showPrismErrorSafe(
+            `Il testo incollato superava il limite di ${maxCharacterLength} caratteri ed è stato troncato.`,
+            { title: 'Limite caratteri' }
+        );
+        return;
+    }
+
+    inputUnlockedByPaste = pastedText.trim().length > 0;
 }
 
 let globalCacheTones = {};
@@ -84,6 +144,7 @@ let globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview:
 let pollInterval = null;
 let tonePollInterval = null;
 let companyUnsubscribe = null; // Memorizza la funzione di rimozione dell'ascolto real-time di Firestore
+let jobToneUnsubscribe = null; // Ascolto real-time toni job su Firestore
 let activeTypewriterTimeout = null; // Memorizza il timeout attivo per l'effetto macchina da scrivere
 
 let currentUserSessionData = { 
@@ -99,6 +160,10 @@ let hasDeductedCreditForJob = false;
 let toneGenHasSeenGenerating = false;
 let toneGenRevealStarted = false;
 let dashboardPlatformLocked = false;
+let dashboardLanguageLocked = false;
+let globalToneAvailability = {};
+let activeJobToneSyncId = null;
+let initialJobToneRestoreDone = false;
 let userGuideActive = false;
 let userGuideCurrentPhase = 0;
 let userGuideAwaitingPhase5 = false;
@@ -156,6 +221,11 @@ firebase.auth().onAuthStateChanged(async (user) => {
                         const generationsLeft = companyData.generations_left;
                         const regenerationsLeft = companyData.regenerations_left;
                         updateCreditsUI(generationsLeft, regenerationsLeft);
+
+                        if (!initialJobToneRestoreDone) {
+                            initialJobToneRestoreDone = true;
+                            restoreActiveJobToneState();
+                        }
                     }
                 }, (error) => {
                     console.error("❌ [CREDITS] Errore sincronizzazione real-time azienda:", error.message);
@@ -256,7 +326,7 @@ async function deductGenerationCredit(companyId) {
  */
 function applyPlanHardLocks(enabledSlugs) {
     document.querySelectorAll('.tone-card').forEach(card => {
-        const slug = card.getAttribute('data-key'); // Ora data-key contiene lo slug esatto (es. 'polemico')
+        const slug = card.getAttribute('data-key'); // slug esatto (es. 'provocatore')
         
         if (card && !enabledSlugs.includes(slug)) {
             card.classList.add('locked-by-plan');
@@ -278,37 +348,50 @@ function getCurrentUserData() {
 // 3. LOGICA DI INTERFACCIA E TRIGGER
 // ==========================================
 
-function handleInputTrigger() {
+function handleInputTrigger(options = {}) {
     if (!topicInputTextarea) return;
-    
-    const text = topicInputTextarea.value.trim();
-    const wordCount = countInputWords(text);
-    
-    const currentLength = text.length;
-    const remaining = maxCharacterLength - currentLength;
-    charCounterDisplay.textContent = `${remaining} / ${maxCharacterLength}`;
-    charCounterDisplay.style.color = remaining <= 10 ? "#ef4444" : "var(--text-dim)";
 
-    const canGenerate = wordCount >= MIN_WORDS_FOR_ANALYZE && !analysisCompleted;
-
-    btnGenerate.disabled = !canGenerate;
-    btnGenerate.style.opacity = canGenerate ? "1" : "0.3";
-
-    if (wordCount >= MIN_WORDS_FOR_ANALYZE) {
-        btnReset.disabled = false;
-        btnReset.style.opacity = "1";
-    } else {
-        btnReset.disabled = true;
-        btnReset.style.opacity = "0.3";
+    const enforced = enforceTopicMaxLength();
+    if (enforced.truncated) {
+        topicInputTextarea.value = enforced.value;
+        showPrismErrorSafe(
+            `Hai raggiunto il limite massimo di ${maxCharacterLength} caratteri.`,
+            { title: 'Limite caratteri' }
+        );
     }
 
-    if (userGuideActive && userGuideCurrentPhase === 1 && wordCount >= MIN_WORDS_FOR_ANALYZE) {
+    const text = topicInputTextarea.value;
+    const trimmed = text.trim();
+
+    if (options.fromPaste || (options.inputType && options.inputType.includes('Paste'))) {
+        if (trimmed.length > 0) inputUnlockedByPaste = true;
+    } else if (options.inputType && options.inputType.startsWith('delete')) {
+        if (!trimmed) inputUnlockedByPaste = false;
+    } else if (options.inputType && !options.inputType.includes('Paste')) {
+        inputUnlockedByPaste = false;
+    }
+
+    updateTopicCharCounter();
+
+    const canGenerate = isTopicReadyForAnalyze(text);
+
+    btnGenerate.disabled = !canGenerate;
+    btnGenerate.style.opacity = canGenerate ? '1' : '0.3';
+
+    const canReset = trimmed.length > 0;
+    btnReset.disabled = !canReset;
+    btnReset.style.opacity = canReset ? '1' : '0.3';
+
+    if (userGuideActive && userGuideCurrentPhase === 1 && isTopicReadyForAnalyze(text)) {
         showUserGuidePhase(2);
     }
 }
 
 if (topicInputTextarea) {
-    topicInputTextarea.addEventListener('input', handleInputTrigger);
+    topicInputTextarea.addEventListener('input', (event) => {
+        handleInputTrigger({ inputType: event.inputType || '' });
+    });
+    topicInputTextarea.addEventListener('paste', handleTopicPaste);
     handleInputTrigger();
 }
 
@@ -325,13 +408,18 @@ window.fullReset = function() {
         globalCacheTones = {};
         analysisCompleted = false;
         hasDeductedCreditForJob = false;
+        initialJobToneRestoreDone = false;
+        inputUnlockedByPaste = false;
         sessionStorage.removeItem('prism_last_job_id');
         console.log("🧹 PRISM: Sessione JobID rimossa.");
 
         // 3. Blocca tutte le card dei toni (rimuove lo stato 'enabled')
         document.querySelectorAll('.tone-card').forEach(card => {
-            card.classList.remove('enabled');
+            card.classList.remove('enabled', 'tone-unavailable');
         });
+        globalToneAvailability = {};
+        activeJobToneSyncId = null;
+        stopToneAvailabilityFirestoreSync();
 
         // 4. Riporta le impostazioni Social/Lingua allo stato bloccato
         if (settingsRow) {
@@ -339,6 +427,8 @@ window.fullReset = function() {
             settingsRow.style.opacity = "0.5";
         }
         unlockDashboardPlatformSelection();
+        resetDashboardLanguageSelection();
+        unlockDashboardLanguageSelection();
 
         // 5. Aggiorna lo stato dei bottoni (torna a disabled)
         handleInputTrigger();
@@ -437,6 +527,14 @@ function isAnalysisJobFailed(jobData) {
     return jobData?.status === 'failed';
 }
 
+// Messaggio blocco shaping (research.shaping.is_blocked === true)
+function getShapingBlockMessage(jobData) {
+    const shaping = jobData?.research?.shaping;
+    if (!shaping || shaping.is_blocked !== true) return null;
+    const msg = (shaping.block_message || '').trim();
+    return msg || 'Il contenuto non può essere analizzato.';
+}
+
 // Apre overlay fullscreen analisi e resetta animazione prisma
 function openAnalysisPrismModal(message) {
     const modal = document.getElementById('prism-modal'); // overlay bloccante analisi
@@ -478,7 +576,9 @@ function handlePipelineError(errorMessage) {
     const btn = document.querySelector('.generate-btn'); // pulsante ANALIZZA
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; } // riabilita
     console.error('🚨 [PRISM ERROR]:', errorMessage); // log errore
-    alert(`Attenzione: ${errorMessage}`); // alert utente
+    if (typeof window.showPrismError === 'function') {
+        window.showPrismError(errorMessage);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -498,6 +598,219 @@ const TONE_GEN_STEP_LABELS = {
 function getToneGenWorkerStep(jobData) {
     const workerState = jobData?.workerState || {}; // stato worker
     return workerState.currentStep || workerState.step || jobData?.pipeline?.step || 'generation'; // step F4
+}
+
+// true se il tono è abilitato alla generazione (tones[toneKey].status === 'ON')
+function isToneGenerationAvailable(toneKey) {
+    const info = globalToneAvailability[toneKey];
+    if (!info) return true;
+    return info.available !== false;
+}
+
+function getToneLockReason(toneKey) {
+    const reason = (globalToneAvailability[toneKey]?.lockReason || '').trim();
+    return reason || 'Questo tono non è disponibile per il contenuto analizzato.';
+}
+
+function parseToneEntryAvailability(entry) {
+    if (entry === null || entry === undefined) return null;
+
+    if (typeof entry === 'boolean') {
+        return { available: entry, lockReason: '' };
+    }
+
+    if (typeof entry === 'string') {
+        const normalized = entry.trim().toUpperCase();
+        const offValues = ['OFF', 'FALSE', 'NO', 'DISABLED', '0', 'UNAVAILABLE', 'LOCKED'];
+        return { available: !offValues.includes(normalized), lockReason: '' };
+    }
+
+    if (typeof entry !== 'object') return null;
+
+    if (typeof entry.available === 'boolean') {
+        return {
+            available: entry.available,
+            lockReason: entry.lock_reason || entry.lockReason || entry.reason || entry.message || ''
+        };
+    }
+
+    if (typeof entry.enabled === 'boolean') {
+        return {
+            available: entry.enabled,
+            lockReason: entry.lock_reason || entry.lockReason || entry.reason || entry.message || ''
+        };
+    }
+
+    const status = entry.status ?? entry.state ?? entry.suitable ?? entry.suitability;
+    if (typeof status === 'boolean') {
+        return {
+            available: status,
+            lockReason: entry.lock_reason || entry.lockReason || entry.reason || entry.message || ''
+        };
+    }
+
+    const statusStr = String(status ?? 'ON').trim().toUpperCase();
+    const offValues = ['OFF', 'FALSE', 'NO', 'DISABLED', '0', 'UNAVAILABLE', 'LOCKED'];
+    return {
+        available: !offValues.includes(statusStr),
+        lockReason: entry.lock_reason || entry.lockReason || entry.reason || entry.message || ''
+    };
+}
+
+function mergeToneSourceMaps(...sources) {
+    const merged = {};
+    sources.forEach((source) => {
+        if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+        Object.keys(source).forEach((key) => {
+            merged[key] = source[key];
+        });
+    });
+    return merged;
+}
+
+function extractAllToneSourcesFromJob(jobData) {
+    if (!jobData) return {};
+
+    return mergeToneSourceMaps(
+        jobData.tones,
+        jobData.testo?.tones,
+        jobData.data?.tones,
+        jobData.data?.testo?.tones,
+        jobData.research?.shaping?.tone_suitability,
+        jobData.research?.tone_suitability,
+        jobData.shaping?.tone_suitability
+    );
+}
+
+function parseToneAvailabilityFromJob(jobData) {
+    const toneSources = extractAllToneSourcesFromJob(jobData);
+    const availability = {};
+
+    document.querySelectorAll('.tone-card').forEach(card => {
+        const slug = card.getAttribute('data-key');
+        if (!slug) return;
+
+        const entry = findToneEntry(toneSources, slug);
+        const parsed = parseToneEntryAvailability(entry);
+
+        availability[slug] = parsed || { available: true, lockReason: '' };
+    });
+
+    return availability;
+}
+
+function renderToneAvailabilityUI() {
+    document.querySelectorAll('.tone-card').forEach(card => {
+        if (card.classList.contains('locked-by-plan')) return;
+
+        const slug = card.getAttribute('data-key');
+        const info = globalToneAvailability[slug];
+
+        card.classList.add('enabled');
+        if (info && info.available === false) {
+            card.classList.add('tone-unavailable');
+        } else {
+            card.classList.remove('tone-unavailable');
+        }
+    });
+}
+
+function applyToneAvailabilityFromJob(jobData) {
+    globalToneAvailability = parseToneAvailabilityFromJob(jobData);
+    renderToneAvailabilityUI();
+    console.log('[PRISM TONES] Disponibilità toni aggiornata:', globalToneAvailability);
+}
+
+function stopToneAvailabilityFirestoreSync() {
+    if (jobToneUnsubscribe) {
+        jobToneUnsubscribe();
+        jobToneUnsubscribe = null;
+    }
+    activeJobToneSyncId = null;
+}
+
+async function startToneAvailabilityFirestoreSync(jobId) {
+    if (!jobId || !window.db) return;
+    if (activeJobToneSyncId === jobId && jobToneUnsubscribe) return;
+
+    stopToneAvailabilityFirestoreSync();
+
+    const attachSnapshot = (ref, label) => {
+        jobToneUnsubscribe = ref.onSnapshot((doc) => {
+            if (!doc.exists) return;
+            applyToneAvailabilityFromJob(doc.data());
+            console.log(`[PRISM TONES] Sync Firestore (${label})`, jobId);
+        }, (error) => {
+            console.warn(`[PRISM TONES] Errore sync Firestore (${label}):`, error.message);
+        });
+    };
+
+    try {
+        const jobRef = window.db.collection('jobs').doc(jobId);
+        const jobSnap = await jobRef.get();
+        if (jobSnap.exists) {
+            applyToneAvailabilityFromJob(jobSnap.data());
+            attachSnapshot(jobRef, 'jobs');
+            activeJobToneSyncId = jobId;
+            return;
+        }
+
+        const contentRef = window.db.collection('contents').doc(jobId);
+        const contentSnap = await contentRef.get();
+        if (contentSnap.exists) {
+            applyToneAvailabilityFromJob(contentSnap.data());
+            attachSnapshot(contentRef, 'contents');
+            activeJobToneSyncId = jobId;
+            return;
+        }
+
+        const byJobId = await window.db.collection('contents').where('job_id', '==', jobId).limit(1).get();
+        if (!byJobId.empty) {
+            const doc = byJobId.docs[0];
+            applyToneAvailabilityFromJob(doc.data());
+            attachSnapshot(doc.ref, 'contents/job_id');
+            activeJobToneSyncId = jobId;
+            return;
+        }
+
+        const byJobIdCamel = await window.db.collection('contents').where('jobId', '==', jobId).limit(1).get();
+        if (!byJobIdCamel.empty) {
+            const doc = byJobIdCamel.docs[0];
+            applyToneAvailabilityFromJob(doc.data());
+            attachSnapshot(doc.ref, 'contents/jobId');
+            activeJobToneSyncId = jobId;
+        }
+    } catch (err) {
+        console.warn('[PRISM TONES] Lookup Firestore non riuscito:', err.message);
+    }
+}
+
+async function restoreActiveJobToneState() {
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    const userData = getCurrentUserData();
+    if (!jobId || !userData.userId) return;
+
+    try {
+        const BACKEND_URL = getBackendUrl();
+        const statusResp = await fetch(`${BACKEND_URL}/jobs/status/${userData.userId}/${jobId}`);
+        const res = await statusResp.json();
+        if (res.success && res.data) {
+            const jobData = res.data;
+            if (isAnalysisJobCompleted(jobData, buildAnalysisPrismUI(jobData))) {
+                analysisCompleted = true;
+                if (settingsRow) {
+                    settingsRow.style.pointerEvents = 'auto';
+                    settingsRow.style.opacity = '1';
+                }
+                applyToneAvailabilityFromJob(jobData);
+                startToneAvailabilityFirestoreSync(jobId);
+                handleInputTrigger();
+            }
+        }
+    } catch (err) {
+        console.warn('[PRISM TONES] Ripristino job attivo non riuscito:', err.message);
+        startToneAvailabilityFirestoreSync(jobId);
+    }
 }
 
 // Estrae l'oggetto tones dal payload job (più path possibili)
@@ -565,20 +878,194 @@ function hasToneInCache(toneKey) {
 function getToneTextFromJob(jobData, toneKey) {
     if (!jobData || !toneKey) return ''; // guard
     const tones = extractTonesFromJob(jobData); // oggetto tones root
-    const entry = findToneEntry(tones, toneKey); // tones.umano
+    const entry = findToneEntry(tones, toneKey); // tones.provocatore
     return extractTextFromToneEntry(entry); // versions[n].text
 }
 
-// Salva tones + media in cache locale dopo generazione F4
+// Salva tones + media in sessione locale dopo generazione F4 (fallback se Firestore non ancora sincronizzato)
 function cacheToneGenerationResult(task) {
     const tones = extractTonesFromJob(task); // tones dal job
-    globalCacheTones = { ...globalCacheTones, ...tones }; // merge cache toni
+    globalCacheTones = { ...globalCacheTones, ...tones }; // merge toni in sessione
     const assets = extractAllDatabaseAssets(task); // immagini + fonti
     globalCacheMedia = {
         verifiedImages: assets.images || [], // formato atteso da renderToneAssetsAndActions
         verifiedTables: [],
         sourcesPreview: assets.sources || []
     };
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getToneVersionTimestampMs(entry) {
+    if (!entry) return -1;
+    if (entry.timestamp?.toDate) return entry.timestamp.toDate().getTime();
+    if (entry.updatedAt?.toDate) return entry.updatedAt.toDate().getTime();
+    if (entry.createdAt) return new Date(entry.createdAt).getTime();
+    if (entry.updatedAt) return new Date(entry.updatedAt).getTime();
+    return -1;
+}
+
+function findStoricoEntries(storico, toneKey) {
+    if (!storico || !toneKey) return [];
+    if (Array.isArray(storico[toneKey])) return storico[toneKey].filter(Boolean);
+    const lower = toneKey.toLowerCase();
+    for (const key of Object.keys(storico)) {
+        if (key.toLowerCase() === lower && Array.isArray(storico[key])) {
+            return storico[key].filter(Boolean);
+        }
+    }
+    return [];
+}
+
+function collectAllToneVersionsFromDoc(docData, toneKey) {
+    if (!docData || !toneKey) return [];
+
+    const candidates = [];
+    const roots = [docData?.testo, docData?.data?.testo, docData].filter(Boolean);
+
+    roots.forEach((root) => {
+        const currentEntry = findToneEntry(root.tones || extractTonesFromJob(root), toneKey);
+        if (currentEntry) candidates.push(currentEntry);
+        candidates.push(...findStoricoEntries(root.storico, toneKey));
+    });
+
+    const rootTones = extractTonesFromJob(docData);
+    const rootEntry = findToneEntry(rootTones, toneKey);
+    if (rootEntry) candidates.push(rootEntry);
+
+    return candidates;
+}
+
+function pickLatestToneVersion(versions) {
+    if (!versions.length) return null;
+
+    return versions.reduce((best, current) => {
+        if (!best) return current;
+
+        const bestVersion = Number(best.version) || 0;
+        const currentVersion = Number(current.version) || 0;
+        if (currentVersion !== bestVersion) {
+            return currentVersion > bestVersion ? current : best;
+        }
+
+        const bestTs = getToneVersionTimestampMs(best);
+        const currentTs = getToneVersionTimestampMs(current);
+        if (bestTs !== currentTs) return currentTs > bestTs ? current : best;
+
+        const bestTextLen = (extractTextFromToneEntry(best) || '').length;
+        const currentTextLen = (extractTextFromToneEntry(current) || '').length;
+        return currentTextLen >= bestTextLen ? current : best;
+    }, null);
+}
+
+function mapFirestoreToneError(err) {
+    const code = err?.code || '';
+    if (code === 'permission-denied') {
+        return 'Permessi insufficienti per leggere il contenuto da Firestore.';
+    }
+    if (code === 'unavailable' || code === 'deadline-exceeded') {
+        return 'Firestore non raggiungibile. Verifica la connessione e riprova.';
+    }
+    return err?.message || 'Errore durante il recupero del contenuto da Firestore.';
+}
+
+async function resolveJobContentDocument(jobId) {
+    if (!window.db || !jobId) return null;
+
+    const contentRef = window.db.collection('contents').doc(jobId);
+    const contentSnap = await contentRef.get();
+    if (contentSnap.exists) {
+        return { ref: contentRef, id: contentSnap.id, data: contentSnap.data(), source: 'contents' };
+    }
+
+    for (const field of ['job_id', 'jobId']) {
+        const querySnap = await window.db.collection('contents').where(field, '==', jobId).limit(1).get();
+        if (!querySnap.empty) {
+            const doc = querySnap.docs[0];
+            return { ref: doc.ref, id: doc.id, data: doc.data(), source: `contents/${field}` };
+        }
+    }
+
+    const jobRef = window.db.collection('jobs').doc(jobId);
+    const jobSnap = await jobRef.get();
+    if (jobSnap.exists) {
+        return { ref: jobRef, id: jobSnap.id, data: jobSnap.data(), source: 'jobs' };
+    }
+
+    return null;
+}
+
+async function fetchLatestToneFromFirestore(jobId, toneKey) {
+    if (!window.db) {
+        return { found: false, error: 'Firestore non disponibile. Ricarica la pagina e riprova.' };
+    }
+    if (!jobId) {
+        return { found: false, error: 'Job di analisi non trovato. Avvia prima l\'analisi.' };
+    }
+    if (!toneKey) {
+        return { found: false, error: 'Tono non valido.' };
+    }
+
+    try {
+        const docResult = await resolveJobContentDocument(jobId);
+        if (!docResult) {
+            return { found: false, error: null, contentData: null, entry: null, text: '' };
+        }
+
+        const latestEntry = pickLatestToneVersion(collectAllToneVersionsFromDoc(docResult.data, toneKey));
+        const text = extractTextFromToneEntry(latestEntry).trim();
+
+        if (!text) {
+            return { found: false, error: null, contentData: docResult.data, entry: null, text: '' };
+        }
+
+        return {
+            found: true,
+            error: null,
+            contentData: docResult.data,
+            entry: latestEntry,
+            text,
+            source: docResult.source
+        };
+    } catch (err) {
+        console.error('❌ [PRISM FIRESTORE TONE] Errore recupero tono:', err);
+        return { found: false, error: mapFirestoreToneError(err), contentData: null, entry: null, text: '' };
+    }
+}
+
+async function fetchLatestToneFromFirestoreWithRetry(jobId, toneKey, attempts = 5, delayMs = 1200) {
+    let lastResult = { found: false, error: null, text: '' };
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        lastResult = await fetchLatestToneFromFirestore(jobId, toneKey);
+        if (lastResult.error || lastResult.found) return lastResult;
+        if (attempt < attempts - 1) await delay(delayMs);
+    }
+
+    return lastResult;
+}
+
+function applyFirestoreToneToSession(toneKey, fetchResult) {
+    if (!fetchResult?.found || !fetchResult.entry) return false;
+
+    globalCacheTones[toneKey] = fetchResult.entry;
+    const assets = extractAllDatabaseAssets(fetchResult.contentData || {});
+    globalCacheMedia = {
+        verifiedImages: assets.images || [],
+        verifiedTables: [],
+        sourcesPreview: assets.sources || []
+    };
+    return true;
+}
+
+function showPrismErrorSafe(message, options) {
+    if (typeof window.showPrismError === 'function') {
+        window.showPrismError(message, options);
+        return;
+    }
+    console.error('[PRISM ERROR]', message);
 }
 
 // Mappa jobData → UI spinner generazione tono
@@ -695,7 +1182,9 @@ function handleToneGenerationError(message) {
     if (modal) modal.style.display = 'none'; // chiude modale
     hideToneGenPrismLoader(); // nasconde prisma
     console.error('🚨 [PRISM TONE ERROR]:', message); // log
-    alert(`Errore di generazione: ${message}`); // alert utente
+    if (typeof window.showPrismError === 'function') {
+        window.showPrismError(message, { title: 'Errore di generazione' });
+    }
 }
 
 // Tick singolo polling F4 — ritorna true se generazione completata
@@ -724,10 +1213,26 @@ async function pollToneGenerationOnce(toneKey, jobId, userId, backendUrl, modalB
     tonePollInterval = null; // reset handle
     updateToneGenPrismUI(TONE_GEN_STEP_LABELS.done, 1.0); // label finale 100%
 
-    cacheToneGenerationResult(task); // salva tones + media in cache
+    cacheToneGenerationResult(task); // fallback temporaneo fino a sync Firestore
 
-    const fullText = getToneTextFromJob(task, toneKey) || getToneTextFromCache(toneKey); // versions[n].text
-    if (!fullText.trim()) console.warn('[PRISM F4] status completed ma testo non trovato — verifica tones[toneKey].versions[n].text'); // debug
+    const firestoreTone = await fetchLatestToneFromFirestoreWithRetry(jobId, toneKey);
+    if (firestoreTone.error) {
+        console.warn('⚠️ [PRISM F4] Firestore post-generazione:', firestoreTone.error);
+    }
+    if (firestoreTone.found) {
+        applyFirestoreToneToSession(toneKey, firestoreTone);
+    }
+
+    let fullText = firestoreTone.found
+        ? firestoreTone.text
+        : (getToneTextFromJob(task, toneKey) || getToneTextFromCache(toneKey));
+
+    if (!fullText.trim()) {
+        const message = firestoreTone.error
+            || 'Generazione completata ma il contenuto non è ancora disponibile su Firestore. Riprova tra qualche secondo.';
+        handleToneGenerationError(message);
+        return true;
+    }
     const richHTMLContent = parseAndCleanContentForModal(fullText); // HTML con tag formattati
 
     dissolveToneGenPrism(() => { // dissolve prisma F4 su status completed
@@ -763,21 +1268,48 @@ function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, tex
 
 window.generateHumanPost = async function() {
     const topic = topicInputTextarea.value.trim();
-    if (!topic) return;
+    if (!topic) {
+        return showPrismErrorSafe('Inserisci uno spunto o incolla un contenuto da analizzare.');
+    }
+
+    if (!isTopicReadyForAnalyze(topicInputTextarea.value)) {
+        return showPrismErrorSafe(
+            'Scrivi almeno 5 parole oppure incolla un contenuto pre-lavorato per avviare l\'analisi.',
+            { title: 'Contenuto insufficiente' }
+        );
+    }
+
+    if (topic.length > maxCharacterLength) {
+        return showPrismErrorSafe(
+            `Il contenuto supera il limite di ${maxCharacterLength} caratteri.`,
+            { title: 'Limite caratteri' }
+        );
+    }
     
     const btn = document.querySelector('.generate-btn');
     const userData = getCurrentUserData();
     const BACKEND_URL = getBackendUrl();
 
-    if (!userData.companyId) return alert("Sincronizzazione profilo in corso...");
+    if (!userData.companyId) {
+        if (typeof window.showPrismError === 'function') {
+            return window.showPrismError('Sincronizzazione profilo in corso...');
+        }
+        return;
+    }
 
     const generationsLeft = currentUserSessionData.companyDetails?.generations_left;
     if (generationsLeft !== undefined && generationsLeft !== null && generationsLeft <= 0) {
-        return alert("Crediti generazioni esauriti. Contatta l'amministratore o effettua l'upgrade del piano.");
+        if (typeof window.showPrismError === 'function') {
+            return window.showPrismError('Crediti generazioni esauriti. Contatta l\'amministratore o effettua l\'upgrade del piano.');
+        }
+        return;
     }
 
     globalCacheTones = {};
     globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] };
+    globalToneAvailability = {};
+    activeJobToneSyncId = null;
+    stopToneAvailabilityFirestoreSync();
     hasDeductedCreditForJob = false;
     openAnalysisPrismModal('In attesa di avvio analisi...');
     
@@ -795,7 +1327,7 @@ window.generateHumanPost = async function() {
         const response = await fetch(`${BACKEND_URL}/api/prepare-shaping`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: userData.userId, companyId: userData.companyId, topic, language: 'italiano' })
+            body: JSON.stringify({ userId: userData.userId, companyId: userData.companyId, topic, language: getSelectedDashboardLanguage() })
         });
 
         const initResult = await response.json();
@@ -812,6 +1344,11 @@ window.generateHumanPost = async function() {
 
                 const jobData = res.data;
                 const ui = buildAnalysisPrismUI(jobData);
+
+                const shapingBlockMessage = getShapingBlockMessage(jobData);
+                if (shapingBlockMessage) {
+                    return handlePipelineError(shapingBlockMessage);
+                }
 
                 if (isAnalysisJobFailed(jobData)) {
                     return handlePipelineError(jobData.error?.message || ui.label || "Errore durante l'analisi");
@@ -835,9 +1372,8 @@ window.generateHumanPost = async function() {
                     }
 
                     if (settingsRow) { settingsRow.style.pointerEvents = "auto"; settingsRow.style.opacity = "1"; }
-                    document.querySelectorAll('.tone-card').forEach(card => {
-                        if (!card.classList.contains('locked-by-plan')) card.classList.add('enabled');
-                    });
+                    applyToneAvailabilityFromJob(jobData);
+                    startToneAvailabilityFirestoreSync(jobId);
                     closeAnalysisPrismModal(true, () => {
                         if (userGuideActive) showUserGuidePhase(4);
                     });
@@ -855,12 +1391,12 @@ window.generateHumanPost = async function() {
 // ==========================================
 
 const TONE_ACCENT_COLORS = {
-    polemico: '#3b82f6',
-    equilibrato: '#f59e0b',
-    umano: '#ef4444',
-    gioviale: '#a855f7',
-    risolutore: '#ec4899',
-    futurista: '#06b6d4'
+    provocatore: '#3b82f6',
+    confidente: '#f59e0b',
+    sferzante: '#ef4444',
+    visionario: '#a855f7',
+    metodologico: '#ec4899',
+    narratore: '#06b6d4'
 };
 
 function hexToRgba(hex, alpha) {
@@ -893,36 +1429,46 @@ window.selectToneCard = async function(toneKey) {
     const card = document.querySelector(`[data-key="${toneKey}"]`);
     if (!card || !card.classList.contains('enabled')) return;
 
+    if (card.classList.contains('tone-unavailable') || !isToneGenerationAvailable(toneKey)) {
+        return showPrismErrorSafe(getToneLockReason(toneKey), { title: 'Tono non disponibile' });
+    }
+
     if (userGuideActive && userGuideCurrentPhase === 4) {
         hideUserGuide();
         userGuideAwaitingPhase5 = true;
     }
 
     const jobId = sessionStorage.getItem('prism_last_job_id');
-    if (!jobId) return alert("Avvia prima l'analisi.");
+    if (!jobId) {
+        return showPrismErrorSafe('Avvia prima l\'analisi.');
+    }
 
     currentActiveToneKey = toneKey;
-
-    // Recupero della piattaforma selezionata per la ricerca
     const platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
-    
-    // Logica di ricerca preventiva su Firestore (Mock/Traccia vuota)
-    let existingToneFromFirestore = null; 
 
-    // Se il tono è stato trovato su Firestore, apri direttamente il popup finale
-    if (existingToneFromFirestore) {
-        globalCacheTones[toneKey] = existingToneFromFirestore;
-        return window.openToneModal(toneKey);
+    card.classList.add('tone-loading');
+
+    try {
+        const firestoreTone = await fetchLatestToneFromFirestore(jobId, toneKey);
+
+        if (firestoreTone.error) {
+            return showPrismErrorSafe(firestoreTone.error, { title: 'Errore recupero contenuto' });
+        }
+
+        if (firestoreTone.found) {
+            applyFirestoreToneToSession(toneKey, firestoreTone);
+            return window.openToneModal(toneKey);
+        }
+
+        lockDashboardPlatformSelection();
+        lockDashboardLanguageSelection();
+        await generateSingleToneWithInteractivePrism(toneKey, jobId, platform);
+    } catch (err) {
+        console.error('❌ [PRISM TONE SELECT] Errore imprevisto:', err);
+        showPrismErrorSafe(err.message || 'Errore imprevisto durante l\'apertura del tono.', { title: 'Errore' });
+    } finally {
+        card.classList.remove('tone-loading');
     }
-
-    // Se esiste già nella cache locale del client, lo mostra direttamente
-    if (hasToneInCache(toneKey)) {
-        return window.openToneModal(toneKey);
-    }
-
-    // Altrimenti, effettua la chiamata a BullMQ e apre immediatamente la modale vettoriale
-    lockDashboardPlatformSelection(); // primo click tono: blocca piattaforma solo in dashboard
-    await generateSingleToneWithInteractivePrism(toneKey, jobId, platform);
 };
 
 /** Blocca i pill piattaforma nella dashboard (non nel popup di rigenerazione). */
@@ -944,6 +1490,39 @@ function unlockDashboardPlatformSelection() {
         platformPill.classList.remove('platform-locked');
         platformPill.style.pointerEvents = '';
         platformPill.style.opacity = '';
+    }
+}
+
+const DASHBOARD_LANGUAGE_DEFAULT = 'italiano';
+
+function getSelectedDashboardLanguage() {
+    const active = document.querySelector('#settingsRow .lang-pill .pill.active');
+    return active?.getAttribute('data-lang') || DASHBOARD_LANGUAGE_DEFAULT;
+}
+
+function resetDashboardLanguageSelection() {
+    document.querySelectorAll('#settingsRow .lang-pill .pill').forEach(p => p.classList.remove('active'));
+    const italianPill = document.querySelector('#settingsRow .lang-pill .pill[data-lang="italiano"]');
+    if (italianPill) italianPill.classList.add('active');
+}
+
+function lockDashboardLanguageSelection() {
+    dashboardLanguageLocked = true;
+    const langPill = document.querySelector('#settingsRow .lang-pill');
+    if (langPill) {
+        langPill.classList.add('lang-locked');
+        langPill.style.pointerEvents = 'none';
+        langPill.style.opacity = '0.55';
+    }
+}
+
+function unlockDashboardLanguageSelection() {
+    dashboardLanguageLocked = false;
+    const langPill = document.querySelector('#settingsRow .lang-pill');
+    if (langPill) {
+        langPill.classList.remove('lang-locked');
+        langPill.style.pointerEvents = '';
+        langPill.style.opacity = '';
     }
 }
 
@@ -994,12 +1573,12 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform) 
                 toneKey: toneKey,
                 jobId: jobId,
                 platform: platform,
-                language: 'italiano'
+                language: getSelectedDashboardLanguage()
             })
         });
 
         const result = await response.json(); // risposta API
-        if (!result.success) throw new Error(result.error); // errore avvio F4
+        if (!result.success) throw new Error(result.error || 'Impossibile avviare la generazione del tono.');
 
         await pollToneGenerationOnce(toneKey, jobId, userData.userId, BACKEND_URL, modalBox, titleEl, textEl); // primo tick immediato
 
@@ -1016,7 +1595,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform) 
         modal.style.display = 'none'; // chiude modale
         hideToneGenPrismLoader(); // nasconde prisma
         console.error('🚨 [PRISM GENERATION ERROR]:', error.message); // log
-        alert(`Errore di connessione o generazione: ${error.message}`); // alert
+        showPrismErrorSafe(error.message || 'Errore di connessione o generazione.', { title: 'Errore di generazione' });
     }
 }
 
@@ -1075,12 +1654,10 @@ function renderToneAssetsAndActions(toneKey) {
 window.regenerateCurrentTone = function() {
     const jobId = sessionStorage.getItem('prism_last_job_id');
     const platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
-    if (!jobId || !currentActiveToneKey) return;
-    
-    // Rimuove il vecchio tono dalla cache per forzare la riscrittura
-    if (globalCacheTones[currentActiveToneKey]) delete globalCacheTones[currentActiveToneKey];
-    
-    // Innesca il flusso della modale interattiva da zero
+    if (!jobId || !currentActiveToneKey) {
+        return showPrismErrorSafe('Impossibile rigenerare: sessione analisi non valida.');
+    }
+
     generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform);
 };
 
@@ -1099,13 +1676,15 @@ function extractAllDatabaseAssets(data) {
 }
 
 /**
- * Apre la modale per toni già generati o salvati in cache in modo istantaneo,
- * con lo scorrimento già abilitato, il modulo di caricamento (Prisma + Testo) nascosto e il glow perimetrale attivo.
+ * Apre la modale per toni già presenti su Firestore (idrati in sessione),
+ * con scorrimento abilitato, loader nascosto e glow perimetrale attivo.
  */
 window.openToneModal = function(toneKey) {
     currentActiveToneKey = toneKey;
-    const toneText = getToneTextFromCache(toneKey); // tones[toneKey].versions[n].text
-    if (!toneText.trim()) return; // nessun contenuto in cache
+    const toneText = getToneTextFromCache(toneKey);
+    if (!toneText.trim()) {
+        return showPrismErrorSafe('Contenuto del tono non disponibile su Firestore.', { title: 'Contenuto non trovato' });
+    }
 
     const modal = document.getElementById('output-modal');
     const modalBox = document.getElementById('output-modal-box');
@@ -1159,7 +1738,13 @@ function parseAndCleanContentForModal(text) {
 
 window.selP = function(el) {
     if (dashboardPlatformLocked) return;
-    document.querySelectorAll('#settingsRow .pill').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('#settingsRow .platform-pill .pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+};
+
+window.selLang = function(el) {
+    if (dashboardLanguageLocked) return;
+    document.querySelectorAll('#settingsRow .lang-pill .pill').forEach(p => p.classList.remove('active'));
     el.classList.add('active');
 };
 
@@ -1303,9 +1888,10 @@ window.executeSurgicalRegen = function(type) {
     closeSidebarExtension();
 
     const jobId = sessionStorage.getItem('prism_last_job_id');
-    if (!jobId || !currentActiveToneKey) return;
+    if (!jobId || !currentActiveToneKey) {
+        return showPrismErrorSafe('Impossibile rigenerare: sessione analisi non valida.');
+    }
 
-    if (globalCacheTones[currentActiveToneKey]) delete globalCacheTones[currentActiveToneKey];
     generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform);
 };
 
@@ -1338,8 +1924,8 @@ function initUserGuide() {
 
     attachGuidePositionListener();
 
-    const text = topicInputTextarea?.value.trim() || '';
-    if (countInputWords(text) >= MIN_WORDS_FOR_ANALYZE) {
+    const text = topicInputTextarea?.value || '';
+    if (isTopicReadyForAnalyze(text)) {
         showUserGuidePhase(2);
     } else {
         showUserGuidePhase(1);
@@ -1364,6 +1950,16 @@ function getUserGuidePlacement(phase) {
 
 function markGuideInteractiveZones(phase) {
     clearGuideInteractiveZones();
+    if (phase === 2) {
+        ['.input-flex-container', '.side-actions'].forEach((selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.classList.add('guide-interactive-zone');
+                userGuideInteractiveEls.push(el);
+            }
+        });
+        return;
+    }
     if (phase !== 4) return;
 
     ['.input-flex-container', '.settings-row', '.tones-grid'].forEach((selector) => {
@@ -1511,7 +2107,7 @@ function showUserGuidePhase(phase) {
     target.classList.add('guide-target-highlight');
     userGuideHighlightedEl = target;
 
-    if (phase === 2) {
+    if (phase === 1 || phase === 2) {
         const inputBox = document.querySelector('.input-box');
         if (inputBox) {
             inputBox.classList.add('guide-textarea-accessible');
@@ -1522,6 +2118,9 @@ function showUserGuidePhase(phase) {
     if (phase === 4) {
         overlay.classList.add('guide-overlay-usable');
         markGuideInteractiveZones(4);
+    } else if (phase === 2) {
+        overlay.classList.remove('guide-overlay-usable');
+        markGuideInteractiveZones(2);
     } else {
         overlay.classList.remove('guide-overlay-usable');
         clearGuideInteractiveZones();
@@ -1618,6 +2217,8 @@ async function dismissUserGuidePermanent() {
         console.log('✅ [GUIDE] user_guide disattivato per', userId);
     } catch (err) {
         console.error('❌ [GUIDE] Errore aggiornamento user_guide:', err.message);
-        alert('Impossibile salvare la preferenza. Riprova.');
+        if (typeof window.showPrismError === 'function') {
+            window.showPrismError('Impossibile salvare la preferenza. Riprova.');
+        }
     }
 }

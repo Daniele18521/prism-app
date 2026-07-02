@@ -95,8 +95,10 @@ firebase.auth().onAuthStateChanged(async (user) => {
     } catch (error) {
         // Catturiamo e logghiamo l'errore in caso di fallimento della connessione o delle Security Rules
         console.error("🚨 [GUARD] Errore critico durante la verifica del profilo su Firestore:", error);
-        // Mostriamo una notifica d'avviso temporanea sul browser dell'utente
-        alert("Errore di sincronizzazione con il database delle utenze. Riprova più tardi.");
+        // Mostriamo il popup di errore PRISM al posto dell'alert nativo
+        if (typeof window.showPrismError === 'function') {
+            window.showPrismError('Errore di sincronizzazione con il database delle utenze. Riprova più tardi.');
+        }
         // Rimuoviamo la sessione Firebase non allineata
         firebase.auth().signOut();
         // Spostiamo la navigazione sulla pagina di login per consentire un nuovo caricamento pulito

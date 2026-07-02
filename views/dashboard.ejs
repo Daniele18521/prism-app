@@ -64,11 +64,39 @@
             z-index: 1;
         }
 
-        textarea {
-            width: 100%; height: 120px;
-            background: transparent; border: none;
-            color: #fff; padding: 20px; font-size: 16px;
-            resize: none; outline: none;
+        textarea, #topicInput {
+            width: 100%;
+            height: 120px;
+            min-height: 120px;
+            max-height: 120px;
+            background: transparent;
+            border: none;
+            color: #fff;
+            padding: 20px;
+            font-size: 16px;
+            resize: none;
+            outline: none;
+            overflow-y: auto;
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+        }
+
+        #topicInput::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #topicInput::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #topicInput::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.14);
+            border-radius: 10px;
+        }
+
+        #topicInput::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.24);
         }
 
         .input-info {
@@ -123,6 +151,24 @@
             cursor: not-allowed;
         }
 
+        .lang-pill {
+            background: #18181b; border: 1px solid #27272a;
+            border-radius: 30px; padding: 4px; display: flex; gap: 5px;
+        }
+
+        .lang-pill.lang-locked {
+            cursor: not-allowed;
+        }
+
+        .lang-pill.lang-locked .pill {
+            cursor: not-allowed;
+        }
+
+        .lang-pill .lang-flag {
+            font-size: 15px;
+            line-height: 1;
+        }
+
         .lang-select { background: #000; border: 1px solid #3f3f46; color: #fff; padding: 8px 15px; border-radius: 20px; font-size: 14px; }
 
         /* --- GRID TONI & LOCK SYSTEM --- */
@@ -146,9 +192,43 @@
             border-left: 5px solid var(--card-color) !important;
         }
 
+        .tone-card.enabled.tone-unavailable {
+            opacity: 1;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.09);
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-left: 3px solid rgba(255, 255, 255, 0.35) !important;
+            border-left-color: rgba(255, 255, 255, 0.35) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .tone-card.enabled.tone-unavailable:hover {
+            animation: none !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.26) !important;
+            border-left-color: rgba(255, 255, 255, 0.4) !important;
+        }
+
+        .tone-card.enabled.tone-unavailable i.icon-top {
+            color: #f4f4f5 !important;
+            filter: none !important;
+            opacity: 0.85;
+        }
+
+        .tone-card.enabled.tone-unavailable h3 {
+            color: #e4e4e7;
+            font-weight: 600;
+        }
+
         .tone-card.locked-by-plan {
             opacity: 0.25 !important;
             filter: grayscale(0.8);
+        }
+
+        .tone-card.tone-loading {
+            pointer-events: wait;
+            opacity: 0.65;
         }
 
         /* --- LOCK BADGE 3D BI-METALLO --- */
@@ -163,14 +243,14 @@
         .tone-card.locked-by-plan .lock-badge { display: block; }
 
         /* Colori semantici — allineati alla rainbow-line */
-        .t-polemico { --card-color: #3b82f6; --card-glow: rgba(59, 130, 246, 0.5); }
-        .t-equilibrato { --card-color: #f59e0b; --card-glow: rgba(245, 158, 11, 0.5); }
-        .t-umano { --card-color: #ef4444; --card-glow: rgba(239, 68, 68, 0.5); }
-        .t-gioviale { --card-color: #a855f7; --card-glow: rgba(168, 85, 247, 0.5); }
-        .t-risolutore { --card-color: #ec4899; --card-glow: rgba(236, 72, 153, 0.5); }
-        .t-futurista { --card-color: #06b6d4; --card-glow: rgba(6, 182, 212, 0.5); }
+        .t-provocatore { --card-color: #3b82f6; --card-glow: rgba(59, 130, 246, 0.5); }
+        .t-confidente { --card-color: #f59e0b; --card-glow: rgba(245, 158, 11, 0.5); }
+        .t-sferzante { --card-color: #ef4444; --card-glow: rgba(239, 68, 68, 0.5); }
+        .t-visionario { --card-color: #a855f7; --card-glow: rgba(168, 85, 247, 0.5); }
+        .t-metodologico { --card-color: #ec4899; --card-glow: rgba(236, 72, 153, 0.5); }
+        .t-narratore { --card-color: #06b6d4; --card-glow: rgba(6, 182, 212, 0.5); }
 
-        .tone-card.enabled:hover {
+        .tone-card.enabled:not(.tone-unavailable):hover {
             animation: tone-card-blink 1.3s ease-in-out infinite;
             border-color: var(--card-color) !important;
             background: rgba(255, 255, 255, 0.035);
@@ -186,7 +266,7 @@
         }
 
         .tone-card i.icon-top { font-size: 32px; color: var(--text-dim); margin-bottom: 15px; }
-        .tone-card.enabled i.icon-top { color: #fff; filter: drop-shadow(0 0 10px var(--card-color)); }
+        .tone-card.enabled:not(.tone-unavailable) i.icon-top { color: #fff; filter: drop-shadow(0 0 10px var(--card-color)); }
         .tone-card h3 { font-size: 13px; font-weight: 700; color: var(--text-dim); }
         .tone-card.enabled h3 { color: #fff; }
 
@@ -920,6 +1000,9 @@
         .user-guide-callout.has-actions {
             pointer-events: auto;
         }
+        .user-guide-callout.has-actions .user-guide-callout-actions {
+            display: flex;
+        }
 
         .user-guide-callout-arrow {
             position: absolute;
@@ -1057,8 +1140,8 @@
 <div class="input-flex-container">
     <div class="input-box">
         <div class="rainbow-line"></div>
-        <textarea id="topicInput" maxlength="200" placeholder="Di cosa vogliamo parlare? Almeno 5 parole per attivare PRISM..."></textarea>
-        <div class="input-info"><span id="charCounter">200 / 200</span></div>
+        <textarea id="topicInput" placeholder="Di cosa vogliamo parlare? Scrivi almeno 5 parole o incolla un contenuto pre-lavorato (max 2000 caratteri)..."></textarea>
+        <div class="input-info"><span id="charCounter">2000 / 2000</span></div>
     </div>
 
     <div class="side-actions">
@@ -1076,39 +1159,42 @@
         <div class="pill active" onclick="selP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
         <div class="pill" onclick="selP(this)">X</div>
     </div>
-    <div class="lang-select">🇮🇹 Italiano</div>
+    <div class="lang-pill" id="dashboardLangPill">
+        <div class="pill lang-pill-option active" data-lang="italiano" onclick="selLang(this)"><span class="lang-flag" aria-hidden="true">🇮🇹</span> Italiano</div>
+        <div class="pill lang-pill-option" data-lang="english" onclick="selLang(this)"><span class="lang-flag" aria-hidden="true">🇬🇧</span> English</div>
+    </div>
 </div>
 
 <div class="tones-grid">
-    <div class="tone-card t-polemico" data-key="polemico" onclick="selectToneCard('polemico')">
+    <div class="tone-card t-provocatore" data-key="provocatore" onclick="selectToneCard('provocatore')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-gavel icon-top"></i></div>
-        <h3>Polemico</h3>
+        <div class="icon-wrapper"><i class="fas fa-fire icon-top"></i></div>
+        <h3>Provocatore</h3>
     </div>
-    <div class="tone-card t-equilibrato" data-key="equilibrato" onclick="selectToneCard('equilibrato')">
+    <div class="tone-card t-confidente" data-key="confidente" onclick="selectToneCard('confidente')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-pen-nib icon-top"></i></div>
-        <h3>Narrativo</h3>
+        <div class="icon-wrapper"><i class="fas fa-shield-halved icon-top"></i></div>
+        <h3>Confidente</h3>
     </div>
-    <div class="tone-card t-umano" data-key="umano" onclick="selectToneCard('umano')">
+    <div class="tone-card t-sferzante" data-key="sferzante" onclick="selectToneCard('sferzante')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-heart icon-top"></i></div>
-        <h3>Umano</h3>
+        <div class="icon-wrapper"><i class="fas fa-bolt icon-top"></i></div>
+        <h3>Sferzante</h3>
     </div>
-    <div class="tone-card t-gioviale" data-key="gioviale" onclick="selectToneCard('gioviale')">
+    <div class="tone-card t-visionario" data-key="visionario" onclick="selectToneCard('visionario')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-theater-masks icon-top"></i></div>
-        <h3>Scherzoso</h3>
+        <div class="icon-wrapper"><i class="fas fa-lightbulb icon-top"></i></div>
+        <h3>Visionario</h3>
     </div>
-    <div class="tone-card t-risolutore" data-key="risolutore" onclick="selectToneCard('risolutore')">
+    <div class="tone-card t-metodologico" data-key="metodologico" onclick="selectToneCard('metodologico')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-tools icon-top"></i></div>
-        <h3>Pragmatico</h3>
+        <div class="icon-wrapper"><i class="fas fa-list-check icon-top"></i></div>
+        <h3>Metodologico</h3>
     </div>
-    <div class="tone-card t-futurista" data-key="futurista" onclick="selectToneCard('futurista')">
+    <div class="tone-card t-narratore" data-key="narratore" onclick="selectToneCard('narratore')">
         <i class="fas fa-lock lock-badge"></i>
-        <div class="icon-wrapper"><i class="fas fa-rocket icon-top"></i></div>
-        <h3>Futurista</h3>
+        <div class="icon-wrapper"><i class="fas fa-book-open-reader icon-top"></i></div>
+        <h3>Narratore</h3>
     </div>
 </div>
 
@@ -1369,6 +1455,7 @@
     </div>
 </footer>
 
+<script src="/prism-error-popup.js"></script>
 <script src="/dashboard.js"></script>
 </body>
 </html>
