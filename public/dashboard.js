@@ -195,6 +195,11 @@ firebase.auth().onAuthStateChanged(async (user) => {
                 const companyId = userData.companyId;
                 userGuideActive = userData.user_guide === true;
 
+                if (userData.user_profile === 'admin') {
+                    const adminLink = document.getElementById('adminNavLink');
+                    if (adminLink) adminLink.style.display = '';
+                }
+
                 // Scollega eventuali listener attivi precedentemente
                 if (companyUnsubscribe) {
                     companyUnsubscribe();
@@ -1532,7 +1537,7 @@ function unlockDashboardLanguageSelection() {
  * ricezione del blocco dati con posizionamento in background del modulo di caricamento, typewriter ultra-veloce,
  * completamento con sblocco dello scroll, dissolvenza totale del modulo e attivazione del glow.
  */
-async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform) {
+async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, language) {
     const modal = document.getElementById('output-modal'); // modale output tono
     const modalBox = document.getElementById('output-modal-box'); // box contenuto
     const titleEl = document.getElementById('modal-tone-title'); // titolo modale
@@ -1573,7 +1578,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform) 
                 toneKey: toneKey,
                 jobId: jobId,
                 platform: platform,
-                language: getSelectedDashboardLanguage()
+                language: language || getSelectedDashboardLanguage()
             })
         });
 
@@ -1807,6 +1812,36 @@ window.copyModalText = function() {
     });
 };
 
+function buildOverlayPlatformPillsHtml() {
+    const currentPlatform = document.querySelector('#settingsRow .platform-pill .pill.active')?.innerText.trim() || 'LinkedIn';
+    const platforms = [
+        { label: 'Facebook', html: '<i class="fab fa-facebook"></i> Facebook' },
+        { label: 'LinkedIn', html: '<i class="fab fa-linkedin"></i> LinkedIn' },
+        { label: 'X', html: 'X' }
+    ];
+    return platforms.map((p) => {
+        const activeClass = p.label === currentPlatform ? ' active' : '';
+        return `<div class="pill${activeClass}" onclick="selOverlayP(this)">${p.html}</div>`;
+    }).join('');
+}
+
+function buildOverlayLanguagePillsHtml() {
+    const currentLang = getSelectedDashboardLanguage();
+    const languages = [
+        { id: 'italiano', flag: '🇮🇹', label: 'Italiano' },
+        { id: 'english', flag: '🇬🇧', label: 'English' }
+    ];
+    return languages.map((lang) => {
+        const activeClass = lang.id === currentLang ? ' active' : '';
+        return `<div class="pill lang-pill-option${activeClass}" data-lang="${lang.id}" onclick="selOverlayLang(this)"><span class="lang-flag" aria-hidden="true">${lang.flag}</span> ${lang.label}</div>`;
+    }).join('');
+}
+
+function getSelectedOverlayLanguage() {
+    const active = document.querySelector('.overlay-lang-pill .pill.active');
+    return active?.getAttribute('data-lang') || getSelectedDashboardLanguage();
+}
+
 window.openSidebarExtension = function(toolType) {
     const sidebar = document.getElementById('modal-sidebar');
     const extensionPane = document.getElementById('sidebar-extension-pane');
@@ -1823,11 +1858,13 @@ window.openSidebarExtension = function(toolType) {
     if (toolType === 'total-regen') {
         body.innerHTML = `
             <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Rigenerazione totale</h4>
-            <p style="font-size:12px; color:var(--text-dim); margin-bottom:4px; line-height:1.5;">Seleziona la piattaforma social di destinazione.</p>
+            <p style="font-size:12px; color:var(--text-dim); margin-bottom:4px; line-height:1.5;">Seleziona piattaforma e lingua del contenuto.</p>
             <div class="overlay-platform-pill">
-                <div class="pill" onclick="selOverlayP(this)"><i class="fab fa-facebook"></i> Facebook</div>
-                <div class="pill active" onclick="selOverlayP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
-                <div class="pill" onclick="selOverlayP(this)">X</div>
+                ${buildOverlayPlatformPillsHtml()}
+            </div>
+            <p style="font-size:11px; color:var(--text-dim); margin:0 0 4px; text-transform:uppercase; letter-spacing:0.5px;">Lingua</p>
+            <div class="overlay-lang-pill">
+                ${buildOverlayLanguagePillsHtml()}
             </div>
             <button class="overlay-action-btn" onclick="executeSurgicalRegen('total')">Rigenera <i class="fas fa-bolt"></i></button>
         `;
@@ -1867,6 +1904,13 @@ window.selOverlayP = function(el) {
     el.classList.add('active');
 };
 
+window.selOverlayLang = function(el) {
+    const container = el.closest('.overlay-lang-pill');
+    if (!container) return;
+    container.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+};
+
 window.updateOverlayCharCounter = function(textarea) {
     const counter = document.getElementById('overlay-chars-left');
     if (!counter) return;
@@ -1876,14 +1920,17 @@ window.updateOverlayCharCounter = function(textarea) {
 };
 
 window.executeSurgicalRegen = function(type) {
-    let platform = document.querySelector('.pill.active')?.innerText.trim() || 'LinkedIn';
+    let platform = document.querySelector('#settingsRow .platform-pill .pill.active')?.innerText.trim() || 'LinkedIn';
+    let language = getSelectedDashboardLanguage();
+
     if (type === 'total') {
-        const overlayActive = document.querySelector('.overlay-platform-pill .pill.active');
-        if (overlayActive) platform = overlayActive.innerText.trim();
+        const overlayPlatform = document.querySelector('.overlay-platform-pill .pill.active');
+        if (overlayPlatform) platform = overlayPlatform.innerText.trim();
+        language = getSelectedOverlayLanguage();
     }
 
     const instructions = document.getElementById('overlay-instructions-input')?.value.trim() || '';
-    console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platform}, istruzioni: ${instructions || '(nessuna)'}`);
+    console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platform}, lingua: ${language}, istruzioni: ${instructions || '(nessuna)'}`);
 
     closeSidebarExtension();
 
@@ -1892,7 +1939,7 @@ window.executeSurgicalRegen = function(type) {
         return showPrismErrorSafe('Impossibile rigenerare: sessione analisi non valida.');
     }
 
-    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform);
+    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform, language);
 };
 
 // ==========================================

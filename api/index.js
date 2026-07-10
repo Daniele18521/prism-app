@@ -53,6 +53,10 @@ app.get('/dashboard', (req, res) => {
   });
 });
 
+app.get('/admin', (req, res) => {
+  res.render('admin_page', { env: process.env.NODE_ENV || 'development' });
+});
+
 // Avvio del Server Frontend
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
