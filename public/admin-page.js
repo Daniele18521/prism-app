@@ -8,7 +8,7 @@ const PROMPT_SECTIONS = [
     {
         id: 'toni',
         label: 'Toni',
-        defaults: ['confidente', 'metodologico', 'sferzante', 'narratore', 'provocatore', 'visionario']
+        defaults: ['confidente', 'metodologico', 'sferzante', 'narratore', 'provocatore', 'visionario', 'promotore']
     },
     { id: 'piattaforma', label: 'Piattaforma' }
 ];
@@ -283,7 +283,7 @@ async function renderPromptsPanel() {
                     <div class="section-body" id="section-body-${section.id}">
                         ${items.length === 0
                             ? `<p class="empty-section">${section.id === 'toni'
-                                ? 'Nessun prompt in questa sezione. Aggiungine uno per iniziare (nomi in minuscolo: confidente, metodologico, sferzante, narratore, provocatore, visionario).'
+                                ? 'Nessun prompt in questa sezione. Aggiungine uno per iniziare (nomi in minuscolo: confidente, metodologico, sferzante, narratore, provocatore, visionario, promotore).'
                                 : 'Nessun prompt in questa sezione. Aggiungine uno per iniziare.'}</p>`
                             : '<div class="prompt-cards-loading"><i class="fas fa-spinner fa-spin"></i> Caricamento...</div>'}
                     </div>

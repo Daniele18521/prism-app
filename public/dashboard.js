@@ -1401,7 +1401,8 @@ const TONE_ACCENT_COLORS = {
     sferzante: '#ef4444',
     visionario: '#a855f7',
     metodologico: '#ec4899',
-    narratore: '#06b6d4'
+    narratore: '#06b6d4',
+    promotore: '#10b981'
 };
 
 function hexToRgba(hex, alpha) {
@@ -1949,7 +1950,7 @@ window.executeSurgicalRegen = function(type) {
 const USER_GUIDE_TEXTS = {
     1: "Benvenuto su PRISM! Inserisci qui lo spunto del tuo post. Può essere un'idea abbozzata, un fatto di cronaca o un concetto grezzo.",
     2: "Ottimo. Ora clicca su ANALIZZA. PRISM cercherà le fonti più autorevoli in tempo reale e preparerà i fatti per la scrittura.",
-    4: "La rifrazione è pronta. Scegli una piattaforma e uno dei 6 toni in basso per vedere il Prisma in azione e generare il tuo post specifico per Facebook, LinkedIn o X. Avrai a disposizione anche lo Split-View per confrontare le modifiche!",
+    4: "La rifrazione è pronta. Scegli una piattaforma e uno dei 7 toni in basso per vedere il Prisma in azione e generare il tuo post specifico per Facebook, LinkedIn o X. Avrai a disposizione anche lo Split-View per confrontare le modifiche!",
     5: "Ecco la tua rifrazione! Usa lo Split-View per confrontare le modifiche se chiedi una rigenerazione. Trovi le fonti inespresse nel Pannello Strategico in basso."
 };
 
