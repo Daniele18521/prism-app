@@ -591,6 +591,90 @@
             position: relative;
         }
 
+        .modal-tone-switcher {
+            display: none;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 12px;
+            margin-bottom: 14px;
+            border-bottom: 1px solid var(--border-grey);
+            scrollbar-width: thin;
+            position: relative;
+            z-index: 20;
+        }
+
+        .modal-tone-switcher::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .modal-tone-switcher::-webkit-scrollbar-thumb {
+            background: #3f3f46;
+            border-radius: 4px;
+        }
+
+        .modal-tone-switcher-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid #27272a;
+            background: #111;
+            color: #d4d4d8;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .modal-tone-switcher-item:hover:not(:disabled):not(.loading) {
+            border-color: #444;
+            color: #fff;
+        }
+
+        .modal-tone-switcher-item.active {
+            border-color: var(--tone-item-color, var(--tone-accent, #a855f7));
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+            box-shadow: 0 0 12px color-mix(in srgb, var(--tone-item-color, #a855f7) 35%, transparent);
+        }
+
+        .modal-tone-switcher-item.loading,
+        .modal-tone-switcher-item:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .modal-tone-switcher-item .tone-mini-icon {
+            font-size: 12px;
+            color: var(--tone-item-color, #a855f7);
+            filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone-item-color, #a855f7) 45%, transparent));
+        }
+
+        .modal-tone-switcher-item .tone-mini-label {
+            white-space: nowrap;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag {
+            font-size: 9px;
+            line-height: 1;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag.generated {
+            color: #10b981;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag.pending {
+            color: #52525b;
+        }
+
+        .modal-tone-switcher-item .tone-mini-spinner {
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+
         .modal-content-column #modal-tone-title {
             font-size: 18px;
             margin-bottom: 20px;
@@ -1344,8 +1428,9 @@
                 </div>
             </div>
 
-            <!-- SEZIONE DESTRA: Titolo + Contenuto del Tono -->
+            <!-- SEZIONE DESTRA: Toolbar toni + Titolo + Contenuto -->
             <div class="modal-content-column">
+                <div id="modal-tone-switcher" class="modal-tone-switcher" aria-label="Selettore toni"></div>
                 <h2 id="modal-tone-title"></h2>
                 <div id="modal-tone-text" style="line-height: 1.8; color: #e4e4e7; font-size: 15px; white-space: pre-wrap;"></div>
                 <div id="modal-tone-assets"></div>
