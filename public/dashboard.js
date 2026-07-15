@@ -170,7 +170,9 @@ let userGuideAwaitingPhase5 = false;
 let userGuideHighlightedEl = null;
 let userGuideTextareaEl = null;
 let userGuideInteractiveEls = [];
-let userGuidePositionHandler = null;
+let modalToneSwitcherBusy = false;
+let sessionGeneratedToneFlags = {};
+let modalToneGenerationRefreshPromise = null;
 
 function getBackendUrl() {
     if (window.FIREBASE_ENV && window.FIREBASE_ENV.backendUrl) {
@@ -411,6 +413,9 @@ window.fullReset = function() {
 
         // 2. Pulizia cache dati e riferimenti JobID in sessione
         globalCacheTones = {};
+        sessionGeneratedToneFlags = {};
+        modalToneGenerationRefreshPromise = null;
+        modalToneSwitcherBusy = false;
         analysisCompleted = false;
         hasDeductedCreditForJob = false;
         initialJobToneRestoreDone = false;
@@ -1183,9 +1188,11 @@ function handleToneGenerationError(message) {
     if (tonePollInterval) clearInterval(tonePollInterval); // ferma polling F4
     tonePollInterval = null; // reset handle
     toneGenRevealStarted = false; // reset flag reveal
+    modalToneSwitcherBusy = false;
     const modal = document.getElementById('output-modal'); // modale output
     if (modal) modal.style.display = 'none'; // chiude modale
     hideToneGenPrismLoader(); // nasconde prisma
+    renderModalToneSwitcher(currentActiveToneKey);
     console.error('🚨 [PRISM TONE ERROR]:', message); // log
     if (typeof window.showPrismError === 'function') {
         window.showPrismError(message, { title: 'Errore di generazione' });
@@ -1226,6 +1233,7 @@ async function pollToneGenerationOnce(toneKey, jobId, userId, backendUrl, modalB
     }
     if (firestoreTone.found) {
         applyFirestoreToneToSession(toneKey, firestoreTone);
+        markToneAsGenerated(toneKey, true);
     }
 
     let fullText = firestoreTone.found
@@ -1262,6 +1270,9 @@ function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, tex
             modalBox.classList.add('completed-glow'); // glow perimetrale tono
             modalBox.style.overflowY = 'auto'; // abilita scroll
         }
+        markToneAsGenerated(toneKey, true);
+        modalToneSwitcherBusy = false;
+        ensureModalToneSwitcherReady(toneKey);
         renderToneAssetsAndActions(toneKey); // galleria media sotto il testo
         triggerUserGuidePhase5IfNeeded(); // guida freemium fase 5
     });
@@ -1312,6 +1323,9 @@ window.generateHumanPost = async function() {
 
     globalCacheTones = {};
     globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] };
+    sessionGeneratedToneFlags = {};
+    modalToneGenerationRefreshPromise = null;
+    modalToneSwitcherBusy = false;
     globalToneAvailability = {};
     activeJobToneSyncId = null;
     stopToneAvailabilityFirestoreSync();
@@ -1401,7 +1415,195 @@ const TONE_ACCENT_COLORS = {
     sferzante: '#ef4444',
     visionario: '#a855f7',
     metodologico: '#ec4899',
-    narratore: '#06b6d4'
+    narratore: '#06b6d4',
+    promotore: '#10b981'
+};
+
+const TONE_DEFINITIONS = [
+    { key: 'provocatore', label: 'Provocatore', icon: 'fa-fire' },
+    { key: 'confidente', label: 'Confidente', icon: 'fa-shield-halved' },
+    { key: 'sferzante', label: 'Sferzante', icon: 'fa-bolt' },
+    { key: 'visionario', label: 'Visionario', icon: 'fa-lightbulb' },
+    { key: 'metodologico', label: 'Metodologico', icon: 'fa-list-check' },
+    { key: 'narratore', label: 'Narratore', icon: 'fa-book-open-reader' },
+    { key: 'promotore', label: 'Promotore', icon: 'fa-bullhorn' }
+];
+
+function getToneDefinition(toneKey) {
+    return TONE_DEFINITIONS.find((tone) => tone.key === toneKey) || {
+        key: toneKey,
+        label: toneKey.charAt(0).toUpperCase() + toneKey.slice(1),
+        icon: 'fa-circle'
+    };
+}
+
+function getEnabledModalToneKeys() {
+    return TONE_DEFINITIONS
+        .map((tone) => tone.key)
+        .filter((toneKey) => {
+            const card = document.querySelector(`.tone-card[data-key="${toneKey}"]`);
+            if (!card || !card.classList.contains('enabled')) return false;
+            if (card.classList.contains('tone-unavailable')) return false;
+            return isToneGenerationAvailable(toneKey);
+        });
+}
+
+async function refreshSessionGeneratedToneFlags(jobId, enabledToneKeys) {
+    const flags = { ...sessionGeneratedToneFlags };
+
+    enabledToneKeys.forEach((toneKey) => {
+        if (hasToneInCache(toneKey)) flags[toneKey] = true;
+    });
+
+    if (!jobId || !window.db || !enabledToneKeys.length) {
+        sessionGeneratedToneFlags = flags;
+        return flags;
+    }
+
+    try {
+        const docResult = await resolveJobContentDocument(jobId);
+        if (docResult?.data) {
+            enabledToneKeys.forEach((toneKey) => {
+                const latestEntry = pickLatestToneVersion(collectAllToneVersionsFromDoc(docResult.data, toneKey));
+                const text = extractTextFromToneEntry(latestEntry).trim();
+                if (text) flags[toneKey] = true;
+            });
+        }
+    } catch (err) {
+        console.warn('[PRISM MODAL SWITCHER] Errore refresh flag generazione:', err.message);
+    }
+
+    sessionGeneratedToneFlags = flags;
+    return flags;
+}
+
+function renderModalToneSwitcher(activeToneKey) {
+    const switcher = document.getElementById('modal-tone-switcher');
+    if (!switcher) return;
+
+    const enabledKeys = getEnabledModalToneKeys();
+    if (!enabledKeys.length) {
+        switcher.style.display = 'none';
+        switcher.innerHTML = '';
+        return;
+    }
+
+    switcher.style.display = 'flex';
+    switcher.innerHTML = enabledKeys.map((toneKey) => {
+        const toneDef = getToneDefinition(toneKey);
+        const isActive = toneKey === activeToneKey;
+        const isGenerated = sessionGeneratedToneFlags[toneKey] === true;
+        const isLoading = modalToneSwitcherBusy && isActive;
+        const color = TONE_ACCENT_COLORS[toneKey] || '#a855f7';
+        const flagClass = isGenerated ? 'generated' : 'pending';
+        const flagIcon = isGenerated ? 'fa-circle-check' : 'fa-circle';
+        const flagTitle = isGenerated
+            ? 'Già generato per questo argomento'
+            : 'Non ancora generato per questo argomento';
+
+        return `
+            <button type="button"
+                class="modal-tone-switcher-item${isActive ? ' active' : ''}${isLoading ? ' loading' : ''}"
+                style="--tone-item-color: ${color}"
+                data-tone-key="${toneKey}"
+                ${modalToneSwitcherBusy ? 'disabled' : ''}
+                onclick="switchModalTone('${toneKey}')"
+                title="${toneDef.label}">
+                <i class="fas ${toneDef.icon} tone-mini-icon" aria-hidden="true"></i>
+                <span class="tone-mini-label">${toneDef.label}</span>
+                ${isLoading
+                    ? '<i class="fas fa-spinner fa-spin tone-mini-spinner" aria-hidden="true"></i>'
+                    : `<i class="fas ${flagIcon} tone-gen-flag ${flagClass}" title="${flagTitle}" aria-hidden="true"></i>`}
+            </button>
+        `;
+    }).join('');
+}
+
+function markToneAsGenerated(toneKey, generated = true) {
+    if (!toneKey) return;
+    sessionGeneratedToneFlags[toneKey] = generated;
+    renderModalToneSwitcher(currentActiveToneKey);
+}
+
+async function ensureModalToneSwitcherReady(activeToneKey) {
+    const enabledKeys = getEnabledModalToneKeys();
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+
+    if (activeToneKey && hasToneInCache(activeToneKey)) {
+        sessionGeneratedToneFlags[activeToneKey] = true;
+    }
+
+    renderModalToneSwitcher(activeToneKey);
+
+    if (!jobId || !enabledKeys.length) return;
+
+    if (modalToneGenerationRefreshPromise) {
+        await modalToneGenerationRefreshPromise;
+        renderModalToneSwitcher(activeToneKey);
+        return;
+    }
+
+    modalToneGenerationRefreshPromise = refreshSessionGeneratedToneFlags(jobId, enabledKeys)
+        .finally(() => { modalToneGenerationRefreshPromise = null; });
+
+    await modalToneGenerationRefreshPromise;
+    renderModalToneSwitcher(activeToneKey);
+}
+
+window.switchModalTone = async function switchModalTone(toneKey) {
+    if (modalToneSwitcherBusy) return;
+    if (toneKey === currentActiveToneKey) return;
+
+    const card = document.querySelector(`.tone-card[data-key="${toneKey}"]`);
+    if (!card || !card.classList.contains('enabled')) return;
+
+    if (card.classList.contains('tone-unavailable') || !isToneGenerationAvailable(toneKey)) {
+        return showPrismErrorSafe(getToneLockReason(toneKey), { title: 'Tono non disponibile' });
+    }
+
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    if (!jobId) {
+        return showPrismErrorSafe('Sessione analisi non valida. Avvia prima l\'analisi.');
+    }
+
+    currentActiveToneKey = toneKey;
+    applyOutputModalToneTheme(toneKey);
+    renderModalToneSwitcher(toneKey);
+
+    if (hasToneInCache(toneKey)) {
+        markToneAsGenerated(toneKey, true);
+        window.openToneModal(toneKey);
+        return;
+    }
+
+    modalToneSwitcherBusy = true;
+    renderModalToneSwitcher(toneKey);
+
+    try {
+        const firestoreTone = await fetchLatestToneFromFirestore(jobId, toneKey);
+
+        if (firestoreTone.error) {
+            modalToneSwitcherBusy = false;
+            renderModalToneSwitcher(currentActiveToneKey);
+            return showPrismErrorSafe(firestoreTone.error, { title: 'Errore recupero contenuto' });
+        }
+
+        if (firestoreTone.found) {
+            applyFirestoreToneToSession(toneKey, firestoreTone);
+            markToneAsGenerated(toneKey, true);
+            modalToneSwitcherBusy = false;
+            window.openToneModal(toneKey);
+            return;
+        }
+
+        const platform = document.querySelector('#settingsRow .platform-pill .pill.active')?.innerText.trim() || 'LinkedIn';
+        await generateSingleToneWithInteractivePrism(toneKey, jobId, platform);
+    } catch (err) {
+        console.error('❌ [PRISM MODAL SWITCHER] Errore cambio tono:', err);
+        modalToneSwitcherBusy = false;
+        renderModalToneSwitcher(currentActiveToneKey);
+        showPrismErrorSafe(err.message || 'Errore durante il cambio tono.', { title: 'Errore' });
+    }
 };
 
 function hexToRgba(hex, alpha) {
@@ -1462,6 +1664,7 @@ window.selectToneCard = async function(toneKey) {
 
         if (firestoreTone.found) {
             applyFirestoreToneToSession(toneKey, firestoreTone);
+            markToneAsGenerated(toneKey, true);
             return window.openToneModal(toneKey);
         }
 
@@ -1547,6 +1750,9 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
     const userData = getCurrentUserData(); // uid + companyId
     const BACKEND_URL = getBackendUrl(); // URL backend BullMQ
 
+    currentActiveToneKey = toneKey;
+    modalToneSwitcherBusy = true;
+
     if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout); // ferma typewriter precedente
     if (tonePollInterval) clearInterval(tonePollInterval); // ferma polling F4 precedente
     tonePollInterval = null; // reset handle polling F4
@@ -1567,6 +1773,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
 
     openToneGenPrismLoader(TONE_GEN_STEP_LABELS.generation, 0.90); // mostra spinner F4
     modal.style.display = 'flex'; // apre modale output
+    ensureModalToneSwitcherReady(toneKey);
 
     try {
         const response = await fetch(`${BACKEND_URL}/api/regenerate-tone-surgical`, { // avvia F4
@@ -1599,6 +1806,8 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
     } catch (error) {
         modal.style.display = 'none'; // chiude modale
         hideToneGenPrismLoader(); // nasconde prisma
+        modalToneSwitcherBusy = false;
+        renderModalToneSwitcher(currentActiveToneKey);
         console.error('🚨 [PRISM GENERATION ERROR]:', error.message); // log
         showPrismErrorSafe(error.message || 'Errore di connessione o generazione.', { title: 'Errore di generazione' });
     }
@@ -1702,6 +1911,7 @@ window.openToneModal = function(toneKey) {
     resetWorkspaceSidebarState();
 
     applyOutputModalToneTheme(toneKey);
+    modalToneSwitcherBusy = false;
 
     titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
     
@@ -1719,6 +1929,8 @@ window.openToneModal = function(toneKey) {
         modalBox.style.overflowY = 'auto'; 
     }
 
+    markToneAsGenerated(toneKey, true);
+    ensureModalToneSwitcherReady(toneKey);
     renderToneAssetsAndActions(toneKey);
     modal.style.display = 'flex';
     triggerUserGuidePhase5IfNeeded();
@@ -1949,7 +2161,7 @@ window.executeSurgicalRegen = function(type) {
 const USER_GUIDE_TEXTS = {
     1: "Benvenuto su PRISM! Inserisci qui lo spunto del tuo post. Può essere un'idea abbozzata, un fatto di cronaca o un concetto grezzo.",
     2: "Ottimo. Ora clicca su ANALIZZA. PRISM cercherà le fonti più autorevoli in tempo reale e preparerà i fatti per la scrittura.",
-    4: "La rifrazione è pronta. Scegli una piattaforma e uno dei 6 toni in basso per vedere il Prisma in azione e generare il tuo post specifico per Facebook, LinkedIn o X. Avrai a disposizione anche lo Split-View per confrontare le modifiche!",
+    4: "La rifrazione è pronta. Scegli una piattaforma e uno dei 7 toni in basso per vedere il Prisma in azione e generare il tuo post specifico per Facebook, LinkedIn o X. Avrai a disposizione anche lo Split-View per confrontare le modifiche!",
     5: "Ecco la tua rifrazione! Usa lo Split-View per confrontare le modifiche se chiedi una rigenerazione. Trovi le fonti inespresse nel Pannello Strategico in basso."
 };
 

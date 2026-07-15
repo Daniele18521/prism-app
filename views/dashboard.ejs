@@ -173,7 +173,7 @@
 
         /* --- GRID TONI & LOCK SYSTEM --- */
         .tones-grid {
-            display: grid; grid-template-columns: repeat(6, 1fr);
+            display: grid; grid-template-columns: repeat(7, 1fr);
             gap: 12px; margin-bottom: 40px;
         }
 
@@ -249,6 +249,7 @@
         .t-visionario { --card-color: #a855f7; --card-glow: rgba(168, 85, 247, 0.5); }
         .t-metodologico { --card-color: #ec4899; --card-glow: rgba(236, 72, 153, 0.5); }
         .t-narratore { --card-color: #06b6d4; --card-glow: rgba(6, 182, 212, 0.5); }
+        .t-promotore { --card-color: #10b981; --card-glow: rgba(16, 185, 129, 0.5); }
 
         .tone-card.enabled:not(.tone-unavailable):hover {
             animation: tone-card-blink 1.3s ease-in-out infinite;
@@ -588,6 +589,90 @@
             flex: 1;
             min-width: 0;
             position: relative;
+        }
+
+        .modal-tone-switcher {
+            display: none;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 12px;
+            margin-bottom: 14px;
+            border-bottom: 1px solid var(--border-grey);
+            scrollbar-width: thin;
+            position: relative;
+            z-index: 20;
+        }
+
+        .modal-tone-switcher::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .modal-tone-switcher::-webkit-scrollbar-thumb {
+            background: #3f3f46;
+            border-radius: 4px;
+        }
+
+        .modal-tone-switcher-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid #27272a;
+            background: #111;
+            color: #d4d4d8;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .modal-tone-switcher-item:hover:not(:disabled):not(.loading) {
+            border-color: #444;
+            color: #fff;
+        }
+
+        .modal-tone-switcher-item.active {
+            border-color: var(--tone-item-color, var(--tone-accent, #a855f7));
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+            box-shadow: 0 0 12px color-mix(in srgb, var(--tone-item-color, #a855f7) 35%, transparent);
+        }
+
+        .modal-tone-switcher-item.loading,
+        .modal-tone-switcher-item:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .modal-tone-switcher-item .tone-mini-icon {
+            font-size: 12px;
+            color: var(--tone-item-color, #a855f7);
+            filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tone-item-color, #a855f7) 45%, transparent));
+        }
+
+        .modal-tone-switcher-item .tone-mini-label {
+            white-space: nowrap;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag {
+            font-size: 9px;
+            line-height: 1;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag.generated {
+            color: #10b981;
+        }
+
+        .modal-tone-switcher-item .tone-gen-flag.pending {
+            color: #52525b;
+        }
+
+        .modal-tone-switcher-item .tone-mini-spinner {
+            font-size: 10px;
+            color: var(--text-dim);
         }
 
         .modal-content-column #modal-tone-title {
@@ -1203,6 +1288,11 @@
         <div class="icon-wrapper"><i class="fas fa-book-open-reader icon-top"></i></div>
         <h3>Narratore</h3>
     </div>
+    <div class="tone-card t-promotore" data-key="promotore" onclick="selectToneCard('promotore')">
+        <i class="fas fa-lock lock-badge"></i>
+        <div class="icon-wrapper"><i class="fas fa-bullhorn icon-top"></i></div>
+        <h3>Promotore</h3>
+    </div>
 </div>
 
 <!-- Modal Analisi — Prisma olografico unificato (stesso asset della generazione toni) -->
@@ -1338,8 +1428,9 @@
                 </div>
             </div>
 
-            <!-- SEZIONE DESTRA: Titolo + Contenuto del Tono -->
+            <!-- SEZIONE DESTRA: Toolbar toni + Titolo + Contenuto -->
             <div class="modal-content-column">
+                <div id="modal-tone-switcher" class="modal-tone-switcher" aria-label="Selettore toni"></div>
                 <h2 id="modal-tone-title"></h2>
                 <div id="modal-tone-text" style="line-height: 1.8; color: #e4e4e7; font-size: 15px; white-space: pre-wrap;"></div>
                 <div id="modal-tone-assets"></div>
