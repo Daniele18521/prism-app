@@ -139,7 +139,7 @@ function handleTopicPaste(event) {
     inputUnlockedByPaste = pastedText.trim().length > 0;
 }
 
-let globalCacheTones = {};
+let globalCacheTones = {}; // idratazione UI post-Firestore (non usata come sorgente dati)
 let globalCacheMedia = { verifiedImages: [], verifiedTables: [], sourcesPreview: [] }; 
 let pollInterval = null;
 let tonePollInterval = null;
@@ -411,7 +411,7 @@ window.fullReset = function() {
         // 1. Pulisce l'area di testo dell'argomento
         topicInputTextarea.value = '';
 
-        // 2. Pulizia cache dati e riferimenti JobID in sessione
+        // 2. Pulizia sessione UI e riferimenti JobID
         globalCacheTones = {};
         sessionGeneratedToneFlags = {};
         modalToneGenerationRefreshPromise = null;
@@ -874,34 +874,35 @@ function extractTextFromToneEntry(entry) {
     return latest?.text || latest?.content || ''; // testo ultima versione
 }
 
-// Testo tono dalla cache locale (stessa struttura versions)
-function getToneTextFromCache(toneKey) {
-    return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
-}
+/**
+ * Recupera il tono da Firestore (ultima versione) e idrata la sessione UI.
+ * Ritorna { status: 'ok'|'missing'|'error', text?, message?, result? }
+ */
+async function resolveToneContentFromFirestore(jobId, toneKey) {
+    if (!window.db) {
+        return { status: 'error', message: 'Firestore non disponibile. Ricarica la pagina e riprova.' };
+    }
+    if (!jobId) {
+        return { status: 'error', message: 'Job di analisi non trovato. Avvia prima l\'analisi.' };
+    }
+    if (!toneKey) {
+        return { status: 'error', message: 'Tono non valido.' };
+    }
 
-// true se il tono è già in cache con testo leggibile
-function hasToneInCache(toneKey) {
-    return Boolean(getToneTextFromCache(toneKey).trim()); // testo non vuoto
-}
-
-// Estrae testo tono dal payload job Redis (per typewriter — NON blocca il dissolve)
-function getToneTextFromJob(jobData, toneKey) {
-    if (!jobData || !toneKey) return ''; // guard
-    const tones = extractTonesFromJob(jobData); // oggetto tones root
-    const entry = findToneEntry(tones, toneKey); // tones.provocatore
-    return extractTextFromToneEntry(entry); // versions[n].text
-}
-
-// Salva tones + media in sessione locale dopo generazione F4 (fallback se Firestore non ancora sincronizzato)
-function cacheToneGenerationResult(task) {
-    const tones = extractTonesFromJob(task); // tones dal job
-    globalCacheTones = { ...globalCacheTones, ...tones }; // merge toni in sessione
-    const assets = extractAllDatabaseAssets(task); // immagini + fonti
-    globalCacheMedia = {
-        verifiedImages: assets.images || [], // formato atteso da renderToneAssetsAndActions
-        verifiedTables: [],
-        sourcesPreview: assets.sources || []
-    };
+    try {
+        const fetchResult = await fetchLatestToneFromFirestore(jobId, toneKey);
+        if (fetchResult.error) {
+            return { status: 'error', message: fetchResult.error };
+        }
+        if (!fetchResult.found || !fetchResult.text.trim()) {
+            return { status: 'missing' };
+        }
+        applyFirestoreToneToSession(toneKey, fetchResult);
+        return { status: 'ok', text: fetchResult.text, result: fetchResult };
+    } catch (err) {
+        console.error('❌ [PRISM FIRESTORE TONE] Errore imprevisto:', err);
+        return { status: 'error', message: mapFirestoreToneError(err) };
+    }
 }
 
 function delay(ms) {
@@ -975,8 +976,20 @@ function mapFirestoreToneError(err) {
     if (code === 'permission-denied') {
         return 'Permessi insufficienti per leggere il contenuto da Firestore.';
     }
-    if (code === 'unavailable' || code === 'deadline-exceeded') {
+    if (code === 'unauthenticated') {
+        return 'Sessione scaduta. Effettua di nuovo l\'accesso e riprova.';
+    }
+    if (code === 'not-found') {
+        return 'Documento contenuto non trovato su Firestore.';
+    }
+    if (code === 'unavailable' || code === 'deadline-exceeded' || code === 'resource-exhausted') {
         return 'Firestore non raggiungibile. Verifica la connessione e riprova.';
+    }
+    if (code === 'failed-precondition' || code === 'aborted') {
+        return 'Operazione Firestore interrotta. Riprova tra qualche secondo.';
+    }
+    if (code === 'invalid-argument') {
+        return 'Parametri non validi per la lettura del contenuto.';
     }
     return err?.message || 'Errore durante il recupero del contenuto da Firestore.';
 }
@@ -1060,6 +1073,7 @@ async function fetchLatestToneFromFirestoreWithRetry(jobId, toneKey, attempts = 
 function applyFirestoreToneToSession(toneKey, fetchResult) {
     if (!fetchResult?.found || !fetchResult.entry) return false;
 
+    // Idratazione sessione UI (non usata come sorgente dati — Firestore resta l'unica fonte)
     globalCacheTones[toneKey] = fetchResult.entry;
     const assets = extractAllDatabaseAssets(fetchResult.contentData || {});
     globalCacheMedia = {
@@ -1225,27 +1239,22 @@ async function pollToneGenerationOnce(toneKey, jobId, userId, backendUrl, modalB
     tonePollInterval = null; // reset handle
     updateToneGenPrismUI(TONE_GEN_STEP_LABELS.done, 1.0); // label finale 100%
 
-    cacheToneGenerationResult(task); // fallback temporaneo fino a sync Firestore
-
     const firestoreTone = await fetchLatestToneFromFirestoreWithRetry(jobId, toneKey);
     if (firestoreTone.error) {
-        console.warn('⚠️ [PRISM F4] Firestore post-generazione:', firestoreTone.error);
-    }
-    if (firestoreTone.found) {
-        applyFirestoreToneToSession(toneKey, firestoreTone);
-        markToneAsGenerated(toneKey, true);
-    }
-
-    let fullText = firestoreTone.found
-        ? firestoreTone.text
-        : (getToneTextFromJob(task, toneKey) || getToneTextFromCache(toneKey));
-
-    if (!fullText.trim()) {
-        const message = firestoreTone.error
-            || 'Generazione completata ma il contenuto non è ancora disponibile su Firestore. Riprova tra qualche secondo.';
-        handleToneGenerationError(message);
+        handleToneGenerationError(firestoreTone.error);
         return true;
     }
+    if (!firestoreTone.found || !firestoreTone.text.trim()) {
+        handleToneGenerationError(
+            'Generazione completata ma il contenuto non è ancora disponibile su Firestore. Riprova tra qualche secondo.'
+        );
+        return true;
+    }
+
+    applyFirestoreToneToSession(toneKey, firestoreTone);
+    markToneAsGenerated(toneKey, true);
+
+    const fullText = firestoreTone.text;
     const richHTMLContent = parseAndCleanContentForModal(fullText); // HTML con tag formattati
 
     dissolveToneGenPrism(() => { // dissolve prisma F4 su status completed
@@ -1451,10 +1460,6 @@ function getEnabledModalToneKeys() {
 async function refreshSessionGeneratedToneFlags(jobId, enabledToneKeys) {
     const flags = { ...sessionGeneratedToneFlags };
 
-    enabledToneKeys.forEach((toneKey) => {
-        if (hasToneInCache(toneKey)) flags[toneKey] = true;
-    });
-
     if (!jobId || !window.db || !enabledToneKeys.length) {
         sessionGeneratedToneFlags = flags;
         return flags;
@@ -1470,7 +1475,7 @@ async function refreshSessionGeneratedToneFlags(jobId, enabledToneKeys) {
             });
         }
     } catch (err) {
-        console.warn('[PRISM MODAL SWITCHER] Errore refresh flag generazione:', err.message);
+        console.warn('[PRISM MODAL SWITCHER] Errore refresh flag generazione:', mapFirestoreToneError(err));
     }
 
     sessionGeneratedToneFlags = flags;
@@ -1529,10 +1534,6 @@ async function ensureModalToneSwitcherReady(activeToneKey) {
     const enabledKeys = getEnabledModalToneKeys();
     const jobId = sessionStorage.getItem('prism_last_job_id');
 
-    if (activeToneKey && hasToneInCache(activeToneKey)) {
-        sessionGeneratedToneFlags[activeToneKey] = true;
-    }
-
     renderModalToneSwitcher(activeToneKey);
 
     if (!jobId || !enabledKeys.length) return;
@@ -1570,29 +1571,21 @@ window.switchModalTone = async function switchModalTone(toneKey) {
     applyOutputModalToneTheme(toneKey);
     renderModalToneSwitcher(toneKey);
 
-    if (hasToneInCache(toneKey)) {
-        markToneAsGenerated(toneKey, true);
-        window.openToneModal(toneKey);
-        return;
-    }
-
     modalToneSwitcherBusy = true;
     renderModalToneSwitcher(toneKey);
 
     try {
-        const firestoreTone = await fetchLatestToneFromFirestore(jobId, toneKey);
+        const resolved = await resolveToneContentFromFirestore(jobId, toneKey);
 
-        if (firestoreTone.error) {
+        if (resolved.status === 'error') {
             modalToneSwitcherBusy = false;
             renderModalToneSwitcher(currentActiveToneKey);
-            return showPrismErrorSafe(firestoreTone.error, { title: 'Errore recupero contenuto' });
+            return showPrismErrorSafe(resolved.message, { title: 'Errore recupero contenuto' });
         }
 
-        if (firestoreTone.found) {
-            applyFirestoreToneToSession(toneKey, firestoreTone);
+        if (resolved.status === 'ok') {
             markToneAsGenerated(toneKey, true);
-            modalToneSwitcherBusy = false;
-            window.openToneModal(toneKey);
+            displayToneModal(toneKey, resolved.text);
             return;
         }
 
@@ -1656,16 +1649,16 @@ window.selectToneCard = async function(toneKey) {
     card.classList.add('tone-loading');
 
     try {
-        const firestoreTone = await fetchLatestToneFromFirestore(jobId, toneKey);
+        const resolved = await resolveToneContentFromFirestore(jobId, toneKey);
 
-        if (firestoreTone.error) {
-            return showPrismErrorSafe(firestoreTone.error, { title: 'Errore recupero contenuto' });
+        if (resolved.status === 'error') {
+            return showPrismErrorSafe(resolved.message, { title: 'Errore recupero contenuto' });
         }
 
-        if (firestoreTone.found) {
-            applyFirestoreToneToSession(toneKey, firestoreTone);
+        if (resolved.status === 'ok') {
             markToneAsGenerated(toneKey, true);
-            return window.openToneModal(toneKey);
+            displayToneModal(toneKey, resolved.text);
+            return;
         }
 
         lockDashboardPlatformSelection();
@@ -1890,14 +1883,13 @@ function extractAllDatabaseAssets(data) {
 }
 
 /**
- * Apre la modale per toni già presenti su Firestore (idrati in sessione),
- * con scorrimento abilitato, loader nascosto e glow perimetrale attivo.
+ * Mostra la modale con contenuto tono già recuperato da Firestore.
  */
-window.openToneModal = function(toneKey) {
+function displayToneModal(toneKey, toneText) {
     currentActiveToneKey = toneKey;
-    const toneText = getToneTextFromCache(toneKey);
-    if (!toneText.trim()) {
-        return showPrismErrorSafe('Contenuto del tono non disponibile su Firestore.', { title: 'Contenuto non trovato' });
+    if (!toneText || !toneText.trim()) {
+        showPrismErrorSafe('Contenuto del tono non disponibile su Firestore.', { title: 'Contenuto non trovato' });
+        return false;
     }
 
     const modal = document.getElementById('output-modal');
@@ -1914,19 +1906,18 @@ window.openToneModal = function(toneKey) {
     modalToneSwitcherBusy = false;
 
     titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
-    
+
     const richHTMLContent = parseAndCleanContentForModal(toneText);
     textEl.innerHTML = `<div style="color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${richHTMLContent}</div>`;
-    
-    // Disattiva il modulo di caricamento e attiva immediatamente lo scorrimento, l'espansione e il glow perimetrale
+
     if (prismBg) {
         prismBg.style.opacity = '0';
         prismBg.style.display = 'none';
     }
     if (modalBox) {
-        modalBox.style.width = '950px'; // Espande la modale per visualizzare la sidebar
+        modalBox.style.width = '950px';
         modalBox.classList.add('completed-glow');
-        modalBox.style.overflowY = 'auto'; 
+        modalBox.style.overflowY = 'auto';
     }
 
     markToneAsGenerated(toneKey, true);
@@ -1934,6 +1925,40 @@ window.openToneModal = function(toneKey) {
     renderToneAssetsAndActions(toneKey);
     modal.style.display = 'flex';
     triggerUserGuidePhase5IfNeeded();
+    return true;
+}
+
+/**
+ * Apre la modale recuperando sempre l'ultima versione del tono da Firestore.
+ */
+window.openToneModal = async function(toneKey) {
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    if (!jobId) {
+        showPrismErrorSafe('Sessione analisi non valida. Avvia prima l\'analisi.', { title: 'Sessione non valida' });
+        return false;
+    }
+
+    const card = document.querySelector(`.tone-card[data-key="${toneKey}"]`);
+    if (card) card.classList.add('tone-loading');
+
+    try {
+        const resolved = await resolveToneContentFromFirestore(jobId, toneKey);
+        if (resolved.status === 'error') {
+            showPrismErrorSafe(resolved.message, { title: 'Errore recupero contenuto' });
+            return false;
+        }
+        if (resolved.status === 'missing') {
+            showPrismErrorSafe('Contenuto del tono non trovato su Firestore.', { title: 'Contenuto non trovato' });
+            return false;
+        }
+        return displayToneModal(toneKey, resolved.text);
+    } catch (err) {
+        console.error('❌ [PRISM OPEN TONE] Errore imprevisto:', err);
+        showPrismErrorSafe(err.message || 'Errore imprevisto durante l\'apertura del tono.', { title: 'Errore' });
+        return false;
+    } finally {
+        if (card) card.classList.remove('tone-loading');
+    }
 };
 
 window.closeToneModal = function() { 
