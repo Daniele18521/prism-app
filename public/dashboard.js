@@ -857,23 +857,6 @@ function normalizeToneVersions(versions) {
     return []; // formato non riconosciuto
 }
 
-// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
-function extractTextFromToneEntry(entry) {
-    if (!entry) return ''; // voce assente
-    if (typeof entry === 'string') return entry; // testo grezzo diretto
-    if (typeof entry.text === 'string' && entry.text) return entry.text; // .text legacy flat
-    if (typeof entry.content === 'string' && entry.content) return entry.content; // .content fallback
-    const versionList = normalizeToneVersions(entry.versions); // lista versioni
-    if (versionList.length === 0) return ''; // nessuna versione con testo
-    const latest = versionList.reduce((best, version) => { // ultima per createdAt
-        if (!best) return version; // prima versione
-        const bestTs = best.createdAt ? new Date(best.createdAt).getTime() : -1; // timestamp best
-        const curTs = version.createdAt ? new Date(version.createdAt).getTime() : -1; // timestamp corrente
-        return curTs >= bestTs ? version : best; // preferisci la più recente
-    }, null);
-    return latest?.text || latest?.content || ''; // testo ultima versione
-}
-
 // Testo tono dalla cache locale (stessa struttura versions)
 function getToneTextFromCache(toneKey) {
     return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
@@ -910,11 +893,56 @@ function delay(ms) {
 
 function getToneVersionTimestampMs(entry) {
     if (!entry) return -1;
+    // Firestore Timestamp nativo
+    if (entry.createdAt?.toDate) return entry.createdAt.toDate().getTime();
     if (entry.timestamp?.toDate) return entry.timestamp.toDate().getTime();
     if (entry.updatedAt?.toDate) return entry.updatedAt.toDate().getTime();
-    if (entry.createdAt) return new Date(entry.createdAt).getTime();
-    if (entry.updatedAt) return new Date(entry.updatedAt).getTime();
+    // Timestamp serializzato { seconds, nanoseconds }
+    const tsLike = entry.createdAt || entry.timestamp || entry.updatedAt;
+    if (tsLike && typeof tsLike === 'object' && tsLike.seconds != null) {
+        return Number(tsLike.seconds) * 1000 + Math.floor(Number(tsLike.nanoseconds || 0) / 1e6);
+    }
+    if (entry.createdAt) {
+        const ms = new Date(entry.createdAt).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    }
+    if (entry.updatedAt) {
+        const ms = new Date(entry.updatedAt).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    }
     return -1;
+}
+
+// Preferisce version numerica più alta, poi createdAt più recente
+function pickNewestVersionEntry(versionList) {
+    if (!versionList || !versionList.length) return null;
+    return versionList.reduce((best, current) => {
+        if (!best) return current;
+        const bestV = Number(best.version) || 0;
+        const curV = Number(current.version) || 0;
+        if (curV !== bestV) return curV > bestV ? current : best;
+        const bestTs = getToneVersionTimestampMs(best);
+        const curTs = getToneVersionTimestampMs(current);
+        return curTs >= bestTs ? current : best;
+    }, null);
+}
+
+// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
+function extractTextFromToneEntry(entry) {
+    if (!entry) return ''; // voce assente
+    if (typeof entry === 'string') return entry; // testo grezzo diretto
+
+    // Se ha versions[], la bozza attiva è SEMPRE l'ultima (non il text root legacy)
+    const versionList = normalizeToneVersions(entry.versions);
+    if (versionList.length > 0) {
+        const latest = pickNewestVersionEntry(versionList);
+        return latest?.text || latest?.content || '';
+    }
+
+    // Singola entry versione (cache post-FS) oppure legacy flat
+    if (typeof entry.text === 'string' && entry.text) return entry.text;
+    if (typeof entry.content === 'string' && entry.content) return entry.content;
+    return '';
 }
 
 function findStoricoEntries(storico, toneKey) {
@@ -937,37 +965,32 @@ function collectAllToneVersionsFromDoc(docData, toneKey) {
 
     roots.forEach((root) => {
         const currentEntry = findToneEntry(root.tones || extractTonesFromJob(root), toneKey);
-        if (currentEntry) candidates.push(currentEntry);
+        if (currentEntry) {
+            // Espandi versions[] in candidati singoli (bozze reali)
+            const nested = normalizeToneVersions(currentEntry.versions);
+            if (nested.length) {
+                nested.forEach((v) => candidates.push(v));
+            } else {
+                // legacy: entry flat con text
+                candidates.push(currentEntry);
+            }
+        }
         candidates.push(...findStoricoEntries(root.storico, toneKey));
     });
 
     const rootTones = extractTonesFromJob(docData);
     const rootEntry = findToneEntry(rootTones, toneKey);
-    if (rootEntry) candidates.push(rootEntry);
+    if (rootEntry) {
+        const nested = normalizeToneVersions(rootEntry.versions);
+        if (nested.length) nested.forEach((v) => candidates.push(v));
+        else candidates.push(rootEntry);
+    }
 
     return candidates;
 }
 
 function pickLatestToneVersion(versions) {
-    if (!versions.length) return null;
-
-    return versions.reduce((best, current) => {
-        if (!best) return current;
-
-        const bestVersion = Number(best.version) || 0;
-        const currentVersion = Number(current.version) || 0;
-        if (currentVersion !== bestVersion) {
-            return currentVersion > bestVersion ? current : best;
-        }
-
-        const bestTs = getToneVersionTimestampMs(best);
-        const currentTs = getToneVersionTimestampMs(current);
-        if (bestTs !== currentTs) return currentTs > bestTs ? current : best;
-
-        const bestTextLen = (extractTextFromToneEntry(best) || '').length;
-        const currentTextLen = (extractTextFromToneEntry(current) || '').length;
-        return currentTextLen >= bestTextLen ? current : best;
-    }, null);
+    return pickNewestVersionEntry(versions);
 }
 
 function mapFirestoreToneError(err) {
@@ -1060,7 +1083,14 @@ async function fetchLatestToneFromFirestoreWithRetry(jobId, toneKey, attempts = 
 function applyFirestoreToneToSession(toneKey, fetchResult) {
     if (!fetchResult?.found || !fetchResult.entry) return false;
 
-    globalCacheTones[toneKey] = fetchResult.entry;
+    // Mantieni struttura completa con versions[] se disponibile dal documento
+    const toneFromDoc = findToneEntry(extractTonesFromJob(fetchResult.contentData || {}), toneKey);
+    if (toneFromDoc && normalizeToneVersions(toneFromDoc.versions).length) {
+        globalCacheTones[toneKey] = toneFromDoc;
+    } else {
+        globalCacheTones[toneKey] = fetchResult.entry;
+    }
+
     const assets = extractAllDatabaseAssets(fetchResult.contentData || {});
     globalCacheMedia = {
         verifiedImages: assets.images || [],
@@ -1264,18 +1294,25 @@ function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, tex
     typewriterWrap.style.cssText = 'color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;'; // stile contenuto
     textEl.appendChild(typewriterWrap); // monta wrapper in #modal-tone-text
 
+    // Scroll SOLO sull'area contenuto (#modal-tone-scroll): switcher/titolo/sidebar restano fissi
+    const scrollEl = document.getElementById('modal-tone-scroll');
+    if (modalBox) modalBox.style.overflow = 'hidden'; // la cornice modale non scorre mai
+    if (scrollEl) scrollEl.scrollTop = 0; // riparti dall'alto all'inizio scrittura
+
     typewriterHTML(typewriterWrap, richHTMLContent, 18, () => { // macchina da scrivere sul wrapper
-        if (modalBox) { // espande modale a fine scrittura
-            modalBox.style.width = '950px'; // larghezza contenuto + sidebar
+        if (modalBox) { // glow a fine scrittura (altezza/larghezza restano fisse)
             modalBox.classList.add('completed-glow'); // glow perimetrale tono
-            modalBox.style.overflowY = 'auto'; // abilita scroll
+            modalBox.style.overflow = 'hidden'; // cornice fissa anche a fine scrittura
+            modalBox.style.width = ''; // ripristina width CSS
+            modalBox.style.height = ''; // ripristina height CSS
         }
         markToneAsGenerated(toneKey, true);
         modalToneSwitcherBusy = false;
         ensureModalToneSwitcherReady(toneKey);
         renderToneAssetsAndActions(toneKey); // galleria media sotto il testo
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight; // resta in fondo dopo media
         triggerUserGuidePhase5IfNeeded(); // guida freemium fase 5
-    });
+    }, scrollEl); // auto-scroll solo dell'area testo
 }
 
 // ==========================================
@@ -1740,7 +1777,7 @@ function unlockDashboardLanguageSelection() {
  * ricezione del blocco dati con posizionamento in background del modulo di caricamento, typewriter ultra-veloce,
  * completamento con sblocco dello scroll, dissolvenza totale del modulo e attivazione del glow.
  */
-async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, language) {
+async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, language, instructions) {
     const modal = document.getElementById('output-modal'); // modale output tono
     const modalBox = document.getElementById('output-modal-box'); // box contenuto
     const titleEl = document.getElementById('modal-tone-title'); // titolo modale
@@ -1749,6 +1786,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
 
     const userData = getCurrentUserData(); // uid + companyId
     const BACKEND_URL = getBackendUrl(); // URL backend BullMQ
+    const instructionsText = String(instructions || '').trim().slice(0, 100); // istruzioni manuali (max 100)
 
     currentActiveToneKey = toneKey;
     modalToneSwitcherBusy = true;
@@ -1766,9 +1804,10 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
     resetWorkspaceSidebarState(); // reset sidebar workspace
     applyOutputModalToneTheme(toneKey); // colori bordo modale
     if (modalBox) {
-        modalBox.style.width = '750px'; // modale compatta durante generazione
         modalBox.classList.remove('completed-glow'); // rimuove glow
-        modalBox.style.overflowY = 'hidden'; // blocca scroll durante prisma
+        modalBox.style.overflow = 'hidden'; // cornice fissa (scroll solo su #modal-tone-scroll)
+        modalBox.style.width = ''; // forza dimensioni CSS fisse (950px / 90vh)
+        modalBox.style.height = ''; // evita altezza inline residua
     }
 
     openToneGenPrismLoader(TONE_GEN_STEP_LABELS.generation, 0.90); // mostra spinner F4
@@ -1785,7 +1824,10 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
                 toneKey: toneKey,
                 jobId: jobId,
                 platform: platform,
-                language: language || getSelectedDashboardLanguage()
+                language: language || getSelectedDashboardLanguage(),
+                // Alias IT/EN: il mock/backend salvano versions[].instructions
+                instructions: instructionsText,
+                istruzioniAggiuntive: instructionsText
             })
         });
 
@@ -1815,11 +1857,18 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, 
 
 /**
  * Gestisce l'effetto typewriter saltando i tag HTML per evitare sfarfallii visivi o stampe di codice grezzo.
+ * Se scrollContainer è passato, tiene in vista la fine del testo mentre cresce oltre l'altezza della modale.
  */
-function typewriterHTML(element, html, speed, callback) {
+function typewriterHTML(element, html, speed, callback, scrollContainer) {
     if (!element) { if (callback) callback(); return; } // target mancante
     let currentHtml = ''; // HTML accumulato carattere per carattere
     let i = 0; // indice posizione nella stringa
+
+    function keepLatestTextVisible() {
+        if (!scrollContainer) return; // nessun contenitore scrollabile
+        // porta in vista la riga appena scritta (parte superiore scorre verso l'alto)
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
 
     function step() {
         if (i < html.length) { // caratteri rimanenti
@@ -1837,8 +1886,10 @@ function typewriterHTML(element, html, speed, callback) {
                 i++; // avanza
             }
             element.innerHTML = currentHtml; // renderizza HTML parziale
+            keepLatestTextVisible(); // auto-scroll verso il fondo
             activeTypewriterTimeout = setTimeout(step, speed); // prossimo carattere
         } else { // scrittura completata
+            keepLatestTextVisible(); // assicura fine testo visibile
             if (callback) callback(); // callback post-typewriter
         }
     }
@@ -1924,10 +1975,14 @@ window.openToneModal = function(toneKey) {
         prismBg.style.display = 'none';
     }
     if (modalBox) {
-        modalBox.style.width = '950px'; // Espande la modale per visualizzare la sidebar
         modalBox.classList.add('completed-glow');
-        modalBox.style.overflowY = 'auto'; 
+        modalBox.style.overflow = 'hidden'; // cornice fissa; scorre solo #modal-tone-scroll
+        modalBox.style.width = ''; // dimensioni fisse da CSS
+        modalBox.style.height = '';
     }
+
+    const scrollEl = document.getElementById('modal-tone-scroll');
+    if (scrollEl) scrollEl.scrollTop = 0;
 
     markToneAsGenerated(toneKey, true);
     ensureModalToneSwitcherReady(toneKey);
@@ -1975,13 +2030,18 @@ function resetWorkspaceSidebarState() {
     const extensionBody = document.getElementById('sidebar-extension-body');
     const regenContent = document.getElementById('regen-options');
     const regenArrow = document.getElementById('arrow-regen-options');
+    const compareContent = document.getElementById('compare-options');
+    const compareArrow = document.getElementById('arrow-compare-options');
 
     closeSidebarExtension();
+    if (typeof closeCompareDiffModal === 'function') closeCompareDiffModal();
     if (sidebar) sidebar.classList.remove('sidebar-collapsed', 'sidebar-expanded');
     if (extensionBody) extensionBody.innerHTML = '';
     if (extensionPane) extensionPane.classList.remove('active');
     if (regenContent) regenContent.style.maxHeight = '0px';
     if (regenArrow) regenArrow.classList.remove('open');
+    if (compareContent) compareContent.style.maxHeight = '0px';
+    if (compareArrow) compareArrow.classList.remove('open');
 }
 
 window.toggleSidebarCollapse = function() {
@@ -2088,13 +2148,19 @@ window.openSidebarExtension = function(toolType) {
             <div class="overlay-char-counter" id="overlay-chars-left">100 caratteri rimasti</div>
             <button class="overlay-action-btn" onclick="executeSurgicalRegen('instructions')">Rigenera <i class="fas fa-bolt"></i></button>
         `;
-    } else if (toolType === 'compare-versions') {
+    } else if (toolType === 'compare-with-version') {
         body.innerHTML = `
-            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta versioni</h4>
-            <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Vista affiancata per confrontare le modifiche storiche.</p>
-            <div style="border: 1px dashed #27272a; padding: 30px 20px; border-radius: 8px; text-align: center; color: var(--text-dim); font-size:12px; min-height: 120px; display:flex; align-items:center; justify-content:center;">
-                Funzionalità in arrivo con la prossima versione
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta con altra versione</h4>
+            <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Seleziona una bozza dello stesso tono da confrontare con quella corrente.</p>
+            <div id="compare-version-list-mount" class="compare-version-list">
+                <div class="compare-version-empty">Caricamento versioni...</div>
             </div>
+        `;
+        loadCompareVersionCards();
+    } else if (toolType === 'compare-with-tone') {
+        body.innerHTML = `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta con altro tono</h4>
+            <div class="compare-version-empty">Funzionalità in arrivo: confronto tra toni diversi sullo stesso argomento.</div>
         `;
     }
 };
@@ -2107,6 +2173,333 @@ window.closeSidebarExtension = function() {
     if (sidebar) sidebar.classList.remove('sidebar-expanded');
     if (extensionPane) extensionPane.classList.remove('active');
     if (body) body.innerHTML = '';
+};
+
+// ==========================================
+// 8b. CONFRONTO VERSIONI (stesso tono)
+// ==========================================
+
+let compareVersionsCache = []; // elenco versioni normalizzate per le card
+let compareBaselineVersion = null; // versione corrente (sinistra nel diff)
+
+function escapeHtmlCompare(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatCompareDate(value) {
+    if (!value) return '—';
+    try {
+        let date = null;
+        if (typeof value?.toDate === 'function') date = value.toDate();
+        else if (value?.seconds != null) date = new Date(Number(value.seconds) * 1000);
+        else date = new Date(value);
+        if (!date || Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleString('it-IT', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (_) {
+        return '—';
+    }
+}
+
+function getCompareTimestampMs(value) {
+    if (!value) return -1;
+    try {
+        if (typeof value?.toDate === 'function') return value.toDate().getTime();
+        if (value?.seconds != null) return Number(value.seconds) * 1000;
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    } catch (_) {
+        return -1;
+    }
+}
+
+function normalizeCompareVersionEntry(raw, index) {
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+        return {
+            id: `v-${index}`,
+            version: index + 1,
+            text: raw,
+            platform: '—',
+            language: '—',
+            instructions: '',
+            regeneratedWith: 'total',
+            createdAt: null,
+            createdAtMs: -1
+        };
+    }
+
+    const text = (typeof raw.text === 'string' && raw.text)
+        || (typeof raw.content === 'string' && raw.content)
+        || '';
+    if (!text.trim()) return null;
+
+    const createdAt = raw.createdAt || raw.timestamp || raw.updatedAt || null;
+    return {
+        id: `v-${raw.version != null ? raw.version : index}`,
+        version: Number(raw.version) > 0 ? Number(raw.version) : (index + 1),
+        text,
+        platform: raw.platform || '—',
+        language: raw.language || '—',
+        instructions: String(raw.instructions || '').trim(),
+        regeneratedWith: raw.regeneratedWith || (String(raw.instructions || '').trim() ? 'instructions' : 'total'),
+        createdAt,
+        createdAtMs: getCompareTimestampMs(createdAt)
+    };
+}
+
+function extractNormalizedVersionsFromToneEntry(toneEntry) {
+    if (!toneEntry) return [];
+    const fromVersions = normalizeToneVersions(toneEntry.versions)
+        .map((item, idx) => normalizeCompareVersionEntry(item, idx))
+        .filter(Boolean);
+
+    if (fromVersions.length) {
+        return fromVersions.sort((a, b) => {
+            if (a.version !== b.version) return a.version - b.version;
+            return a.createdAtMs - b.createdAtMs;
+        });
+    }
+
+    // fallback legacy flat text
+    const flat = normalizeCompareVersionEntry({
+        text: typeof toneEntry === 'string' ? toneEntry : (toneEntry.text || toneEntry.content || ''),
+        version: Number(toneEntry.version) || 1,
+        platform: toneEntry.platform,
+        language: toneEntry.language,
+        instructions: toneEntry.instructions,
+        createdAt: toneEntry.createdAt || toneEntry.updatedAt
+    }, 0);
+    return flat ? [flat] : [];
+}
+
+async function fetchToneVersionsForCompare(toneKey) {
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    const key = toneKey || currentActiveToneKey;
+    if (!key) return [];
+
+    // Preferisci Firestore; fallback cache locale
+    try {
+        if (jobId && window.db) {
+            const docResult = await resolveJobContentDocument(jobId);
+            if (docResult?.data) {
+                const tones = extractTonesFromJob(docResult.data);
+                const entry = findToneEntry(tones, key);
+                const list = extractNormalizedVersionsFromToneEntry(entry);
+                if (list.length) return list;
+            }
+        }
+    } catch (err) {
+        console.warn('[PRISM COMPARE] Lettura versioni FS fallita:', err.message);
+    }
+
+    const cachedEntry = findToneEntry(globalCacheTones, key);
+    return extractNormalizedVersionsFromToneEntry(cachedEntry);
+}
+
+function resolveCompareBaseline(versions) {
+    if (!versions.length) return null;
+    // Baseline = SEMPRE l'ultima versione (numero più alto), non match per testo
+    return versions.reduce((best, current) => {
+        if (!best) return current;
+        const bestV = Number(best.version) || 0;
+        const curV = Number(current.version) || 0;
+        if (curV !== bestV) return curV > bestV ? current : best;
+        return (current.createdAtMs || 0) >= (best.createdAtMs || 0) ? current : best;
+    }, null);
+}
+
+function buildCompareVersionCardHtml(version, baselineId) {
+    const instructions = version.instructions
+        ? escapeHtmlCompare(version.instructions)
+        : '<em style="opacity:0.7">Nessuna istruzione</em>';
+    const safeIdAttr = escapeHtmlCompare(version.id);
+    const safeIdJs = JSON.stringify(String(version.id));
+    return `
+        <div class="compare-version-card" data-version-id="${safeIdAttr}" onclick='selectCompareVersion(${safeIdJs})'>
+            <div class="compare-version-card-title">
+                <span>Versione ${escapeHtmlCompare(version.version)}</span>
+                <span style="color:#3b82f6;font-size:10px;">CONFRONTA</span>
+            </div>
+            <div class="compare-version-card-meta">
+                <div><strong>Data creazione:</strong> ${escapeHtmlCompare(formatCompareDate(version.createdAt))}</div>
+                <div><strong>Piattaforma:</strong> ${escapeHtmlCompare(version.platform || '—')}</div>
+                <div><strong>Lingua:</strong> ${escapeHtmlCompare(version.language || '—')}</div>
+                <div><strong>Istruzioni:</strong> ${instructions}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function loadCompareVersionCards() {
+    const mount = document.getElementById('compare-version-list-mount');
+    if (!mount) return;
+
+    const toneKey = currentActiveToneKey;
+    if (!toneKey) {
+        mount.innerHTML = '<div class="compare-version-empty">Nessun tono attivo da confrontare.</div>';
+        return;
+    }
+
+    const versions = await fetchToneVersionsForCompare(toneKey);
+    compareVersionsCache = versions;
+    compareBaselineVersion = resolveCompareBaseline(versions);
+
+    if (!versions.length) {
+        mount.innerHTML = '<div class="compare-version-empty">Nessuna versione disponibile per questo tono.</div>';
+        return;
+    }
+
+    // Solo versioni PRECEDENTI (version < corrente). Mai l'ultima appena creata.
+    const baselineNum = Number(compareBaselineVersion?.version) || 0;
+    const selectable = versions
+        .filter((v) => (Number(v.version) || 0) < baselineNum)
+        .sort((a, b) => (Number(b.version) || 0) - (Number(a.version) || 0));
+
+    if (!selectable.length) {
+        mount.innerHTML = `
+            <div class="compare-version-empty">
+                C\'è una sola versione per «${escapeHtmlCompare(toneKey)}».<br>
+                Genera o rigenera il tono per abilitare il confronto con versioni precedenti.
+            </div>
+        `;
+        return;
+    }
+
+    const baselineLabel = compareBaselineVersion
+        ? `Versione corrente: v${compareBaselineVersion.version}`
+        : 'Versione corrente non rilevata';
+
+    mount.innerHTML = `
+        <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px;">${escapeHtmlCompare(baselineLabel)} — seleziona una versione precedente.</p>
+        ${selectable.map((v) => buildCompareVersionCardHtml(v, compareBaselineVersion?.id)).join('')}
+    `;
+}
+
+function tokenizeForDiff(text) {
+    return String(text || '').match(/\s+|[^\s]+/g) || [];
+}
+
+function computeSideBySideWordDiff(leftText, rightText) {
+    const a = tokenizeForDiff(leftText);
+    const b = tokenizeForDiff(rightText);
+    const m = a.length;
+    const n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+    for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+            dp[i][j] = a[i] === b[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const leftParts = [];
+    const rightParts = [];
+    let i = 0;
+    let j = 0;
+
+    while (i < m && j < n) {
+        if (a[i] === b[j]) {
+            leftParts.push({ type: 'same', value: a[i] });
+            rightParts.push({ type: 'same', value: b[j] });
+            i++;
+            j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            leftParts.push({ type: 'removed', value: a[i] });
+            i++;
+        } else {
+            rightParts.push({ type: 'added', value: b[j] });
+            j++;
+        }
+    }
+    while (i < m) {
+        leftParts.push({ type: 'removed', value: a[i++] });
+    }
+    while (j < n) {
+        rightParts.push({ type: 'added', value: b[j++] });
+    }
+
+    return { leftParts, rightParts };
+}
+
+function renderDiffPartsToHtml(parts) {
+    return parts.map((part) => {
+        const safe = escapeHtmlCompare(part.value);
+        if (part.type === 'removed') return `<span class="diff-removed">${safe}</span>`;
+        if (part.type === 'added') return `<span class="diff-added">${safe}</span>`;
+        return safe;
+    }).join('');
+}
+
+function buildCompareMetaHtml(version, roleLabel) {
+    if (!version) {
+        return `<div class="meta-title">${escapeHtmlCompare(roleLabel)}</div><div>Dati non disponibili</div>`;
+    }
+    const instructions = version.instructions
+        ? escapeHtmlCompare(version.instructions)
+        : '<em style="opacity:0.7">Nessuna istruzione</em>';
+    return `
+        <div class="meta-title">${escapeHtmlCompare(roleLabel)} · v${escapeHtmlCompare(version.version)}</div>
+        <div><strong>Data creazione:</strong> ${escapeHtmlCompare(formatCompareDate(version.createdAt))}</div>
+        <div><strong>Piattaforma:</strong> ${escapeHtmlCompare(version.platform || '—')}</div>
+        <div><strong>Lingua:</strong> ${escapeHtmlCompare(version.language || '—')}</div>
+        <div><strong>Istruzioni:</strong> ${instructions}</div>
+    `;
+}
+
+window.selectCompareVersion = function(versionId) {
+    const selected = compareVersionsCache.find((v) => v.id === versionId);
+    if (!selected) {
+        return showPrismErrorSafe('Versione non trovata.', { title: 'Confronto non disponibile' });
+    }
+    if (!compareBaselineVersion) {
+        return showPrismErrorSafe('Versione corrente non disponibile per il confronto.', { title: 'Confronto non disponibile' });
+    }
+    if (selected.id === compareBaselineVersion.id) {
+        return showPrismErrorSafe('Seleziona una versione diversa da quella corrente.', { title: 'Stessa versione' });
+    }
+    openCompareDiffModal(compareBaselineVersion, selected);
+};
+
+window.openCompareDiffModal = function(leftVersion, rightVersion) {
+    const overlay = document.getElementById('compare-diff-modal');
+    const metaLeft = document.getElementById('compare-diff-meta-left');
+    const metaRight = document.getElementById('compare-diff-meta-right');
+    const bodyLeft = document.getElementById('compare-diff-body-left');
+    const bodyRight = document.getElementById('compare-diff-body-right');
+    const subtitle = document.getElementById('compare-diff-subtitle');
+    if (!overlay || !metaLeft || !metaRight || !bodyLeft || !bodyRight) return;
+
+    const toneLabel = (currentActiveToneKey || 'tono').toUpperCase();
+    if (subtitle) {
+        subtitle.textContent = `Tono ${toneLabel}: versione corrente (sinistra) vs versione selezionata (destra).`;
+    }
+
+    metaLeft.innerHTML = buildCompareMetaHtml(leftVersion, 'Versione corrente');
+    metaRight.innerHTML = buildCompareMetaHtml(rightVersion, 'Versione selezionata');
+
+    const { leftParts, rightParts } = computeSideBySideWordDiff(leftVersion.text || '', rightVersion.text || '');
+    bodyLeft.innerHTML = renderDiffPartsToHtml(leftParts);
+    bodyRight.innerHTML = renderDiffPartsToHtml(rightParts);
+
+    overlay.classList.add('open');
+};
+
+window.closeCompareDiffModal = function() {
+    const overlay = document.getElementById('compare-diff-modal');
+    if (overlay) overlay.classList.remove('open');
 };
 
 window.selOverlayP = function(el) {
@@ -2141,7 +2534,15 @@ window.executeSurgicalRegen = function(type) {
         language = getSelectedOverlayLanguage();
     }
 
-    const instructions = document.getElementById('overlay-instructions-input')?.value.trim() || '';
+    // Cattura istruzioni PRIMA di chiudere il pannello (il DOM del textarea viene distrutto)
+    const instructions = type === 'instructions'
+        ? (document.getElementById('overlay-instructions-input')?.value.trim() || '')
+        : '';
+
+    if (type === 'instructions' && !instructions) {
+        return showPrismErrorSafe('Inserisci le istruzioni manuali prima di rigenerare.', { title: 'Istruzioni mancanti' });
+    }
+
     console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platform}, lingua: ${language}, istruzioni: ${instructions || '(nessuna)'}`);
 
     closeSidebarExtension();
@@ -2151,7 +2552,7 @@ window.executeSurgicalRegen = function(type) {
         return showPrismErrorSafe('Impossibile rigenerare: sessione analisi non valida.');
     }
 
-    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform, language);
+    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform, language, instructions);
 };
 
 // ==========================================
