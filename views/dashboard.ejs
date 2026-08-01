@@ -23,24 +23,48 @@
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Inter', -apple-system, sans-serif;
-            padding: 20px 40px;
+            padding: 0;
             display: flex;
             flex-direction: column;
             min-height: 100vh;
             overflow-x: hidden;
             /* Padding inferiore aggiuntivo per fare spazio al footer fisso ed evitare sovrapposizioni di contenuto */
-            padding-bottom: 80px; 
+            padding-bottom: 80px;
         }
 
-        /* --- HEADER --- */
+        /* --- HEADER (barra integrata col resto della pagina) --- */
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            width: 100%;
+            max-width: 1050px;
+            margin: 0 auto;
+            padding: 8px 40px 7px;
+            position: relative;
+            z-index: 5;
         }
 
-        .nav-right { display: flex; gap: 20px; font-size: 13px; align-items: center; }
+        header img {
+            width: 72px;
+            height: auto;
+            display: block;
+        }
+
+        header::after {
+            content: '';
+            position: absolute;
+            left: 40px;
+            right: 40px;
+            bottom: 0;
+            height: 2px;
+            border-radius: 2px;
+            background: linear-gradient(to right, #3b82f6, #f59e0b, #ef4444, #a855f7, #ec4899, #06b6d4);
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.25);
+            opacity: 0.95;
+        }
+
+        .nav-right { display: flex; gap: 18px; font-size: 12px; align-items: center; }
         .nav-right span { cursor: pointer; color: var(--text-dim); transition: color 0.2s; }
         .nav-right span:hover { color: #fff; }
 
@@ -52,16 +76,23 @@
             gap: 20px;
             width: 100%;
             max-width: 1050px;
-            margin: 0 auto 20px auto;
+            margin: 18px auto 20px auto;
+            padding: 0 40px;
         }
 
-        .input-box { flex: 1; max-width: 800px; position: relative; }
+        .input-box {
+            flex: 1;
+            max-width: 800px;
+            position: relative;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(13,13,13,0.92) 28%);
+            border: 1px solid var(--border-grey);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
 
         .rainbow-line {
-            height: 4px;
-            background: linear-gradient(to right, #3b82f6, #f59e0b, #ef4444, #a855f7, #ec4899, #06b6d4);
-            box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
-            z-index: 1;
+            display: none; /* la rainbow vive sotto l'header per unire chrome e contenuto */
         }
 
         textarea, #topicInput {
@@ -129,7 +160,11 @@
         /* --- SETTINGS (BLOCCATI INITIAL) --- */
         .settings-row {
             display: flex; justify-content: center; align-items: center; gap: 40px;
-            margin-bottom: 30px; pointer-events: none; opacity: 0.5;
+            margin: 0 auto 30px auto;
+            width: 100%;
+            max-width: 1050px;
+            padding: 0 40px;
+            pointer-events: none; opacity: 0.5;
         }
 
         .platform-pill {
@@ -142,6 +177,20 @@
             cursor: pointer; color: var(--text-dim); display: flex; align-items: center; gap: 6px;
         }
         .pill.active { background: #3f3f46; color: #fff; }
+
+        /* Colori brand ufficiali solo sulle icone (riferimento funzionale piattaforma) */
+        .platform-pill .pill .fa-facebook,
+        .overlay-platform-pill .pill .fa-facebook {
+            color: #1877F2;
+        }
+        .platform-pill .pill .fa-linkedin,
+        .overlay-platform-pill .pill .fa-linkedin {
+            color: #0A66C2;
+        }
+        .platform-pill .pill .fa-x-twitter,
+        .overlay-platform-pill .pill .fa-x-twitter {
+            color: #E7E9EA; /* X brand su UI scura */
+        }
 
         .platform-pill.platform-locked {
             cursor: not-allowed;
@@ -188,7 +237,11 @@
         /* --- GRID TONI & LOCK SYSTEM --- */
         .tones-grid {
             display: grid; grid-template-columns: repeat(7, 1fr);
-            gap: 12px; margin-bottom: 40px;
+            gap: 12px;
+            margin: 0 auto 40px auto;
+            width: 100%;
+            max-width: 1050px;
+            padding: 0 40px;
         }
 
         .tone-card {
@@ -433,7 +486,7 @@
            ========================================================================== */
         
         .output-modal-box {
-            background: #0d0d0d;
+            background: var(--bg-color);
             border: 1px solid var(--tone-border, var(--border-grey));
             padding: 35px;
             border-radius: 12px;
@@ -459,6 +512,152 @@
             box-shadow: 0 0 30px var(--tone-glow-1, rgba(37, 99, 235, 0.15)),
                         0 0 50px var(--tone-glow-2, rgba(168, 85, 247, 0.1)),
                         0 0 70px var(--tone-glow-1, rgba(6, 182, 212, 0.15));
+        }
+
+        /* Chrome azioni in alto a destra (expand / restore / dashboard / close) */
+        .modal-chrome-actions {
+            position: absolute;
+            top: 16px;
+            right: 18px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-chrome-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            border: 1px solid #27272a;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-dim);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            transition: color 0.2s, border-color 0.2s, background 0.2s;
+        }
+
+        .modal-chrome-btn:hover {
+            color: #fff;
+            border-color: #3f3f46;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .modal-chrome-btn.is-danger:hover {
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.45);
+        }
+
+        /* Modalità pagina intera: lascia visibili header + footer dashboard */
+        #output-modal.tone-modal-fullscreen {
+            top: var(--tone-fs-top, 72px);
+            bottom: var(--tone-fs-bottom, 56px);
+            left: 0;
+            right: 0;
+            width: 100%;
+            height: auto;
+            padding: 0;
+            align-items: stretch;
+            justify-content: stretch;
+            background: var(--bg-color);
+            z-index: 900;
+        }
+
+        #output-modal.tone-modal-fullscreen .output-modal-box {
+            width: 100% !important;
+            max-width: none;
+            height: 100% !important;
+            max-height: none;
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+            border-top: none;
+            border-bottom: none;
+        }
+
+        body.tone-modal-fullscreen-active header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            max-width: none;
+            margin: 0;
+            z-index: 10050;
+            background: var(--bg-color);
+            /* Stesse dimensioni della dashboard: continuità visiva */
+        }
+
+        body.tone-modal-fullscreen-active .credits-footer {
+            z-index: 10050;
+        }
+
+        #output-modal.tone-modal-fullscreen .modal-chrome-btn[data-action="expand"] {
+            display: none;
+        }
+
+        #output-modal:not(.tone-modal-fullscreen) .modal-chrome-btn[data-action="restore"],
+        #output-modal:not(.tone-modal-fullscreen) .modal-chrome-btn[data-action="dashboard"] {
+            display: none;
+        }
+
+        /* Dettagli generazione (pannello estensione a destra) */
+        .generation-details-panel {
+            display: grid;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.45;
+        }
+
+        .generation-details-panel .meta-row {
+            word-break: break-word;
+        }
+
+        .generation-details-panel .meta-row strong {
+            color: #a1a1aa;
+            font-weight: 600;
+        }
+
+        .generation-details-topic-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 0;
+        }
+
+        .generation-details-topic-wrap label {
+            color: #a1a1aa;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .generation-details-topic {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 56px;
+            max-height: 40vh;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #27272a;
+            background: rgba(255, 255, 255, 0.02);
+            color: #e4e4e7;
+            font-size: 12px;
+            line-height: 1.5;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+        }
+
+        .generation-details-empty {
+            opacity: 0.7;
+            font-style: italic;
+            font-size: 12px;
         }
 
         /* Modulo di allineamento e posizionamento per prisma e caricamento testuale */
@@ -609,7 +808,7 @@
             gap: 6px;
             overflow: hidden;
             padding-bottom: 12px;
-            padding-right: 28px; /* spazio per la X di chiusura */
+            padding-right: 150px; /* spazio per expand / restore / dashboard / close */
             margin-bottom: 14px;
             border-bottom: 1px solid var(--border-grey);
             position: relative;
@@ -700,17 +899,6 @@
             color: var(--text-dim);
         }
 
-        .modal-content-column #modal-tone-title {
-            font-size: 18px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-grey);
-            padding-bottom: 10px;
-            color: #fff;
-            position: relative;
-            z-index: 15;
-            flex-shrink: 0; /* titolo sempre visibile */
-        }
-
         /* Unica area scrollabile: testo + assets */
         .modal-tone-scroll {
             flex: 1;
@@ -760,7 +948,7 @@
             z-index: 25;
         }
 
-        .output-modal-box.completed-glow .modal-sidebar-panel:not(.sidebar-collapsed) {
+        .output-modal-box.completed-glow .modal-sidebar-panel {
             width: 250px;
             opacity: 1;
             margin-right: 25px;
@@ -768,18 +956,10 @@
             border-right: 1px solid var(--border-grey);
         }
 
-        .output-modal-box.completed-glow .modal-sidebar-panel.sidebar-collapsed {
-            width: 0;
-            opacity: 1;
-            margin-right: 0;
-            padding-right: 0;
-            border-right-color: transparent;
-        }
-
         .modal-sidebar-panel.sidebar-expanded {
             width: 580px !important;
             z-index: 30;
-            background: rgba(13, 13, 13, 0.97);
+            background: var(--bg-color);
             box-shadow: 8px 0 30px rgba(0, 0, 0, 0.5);
         }
 
@@ -788,10 +968,6 @@
             flex-direction: column;
             width: 100%;
             min-width: 0;
-        }
-
-        .modal-sidebar-panel.sidebar-collapsed .sidebar-inner-row {
-            visibility: hidden;
         }
 
         .sidebar-header {
@@ -813,45 +989,14 @@
             font-size: 13px;
         }
 
-        .sidebar-toggle-tab {
-            position: absolute;
-            top: 50%;
-            right: -14px;
-            transform: translateY(-50%);
-            width: 14px;
-            height: 52px;
-            background: #18181b;
-            border: 1px solid var(--border-grey);
-            border-left: none;
-            border-radius: 0 6px 6px 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 35;
-            color: var(--text-dim);
-            font-size: 9px;
-            transition: color 0.2s, background 0.2s;
-        }
-        .sidebar-toggle-tab:hover {
-            color: #fff;
-            background: #27272a;
-        }
-        .output-modal-box.completed-glow .sidebar-toggle-tab {
-            display: flex;
-        }
-        .modal-sidebar-panel.sidebar-collapsed .sidebar-toggle-tab {
-            right: -14px;
-        }
-        .modal-sidebar-panel.sidebar-collapsed .sidebar-toggle-tab i {
-            transform: rotate(180deg);
-        }
-
         .sidebar-tools-list {
             display: flex;
             flex-direction: column;
             gap: 10px;
-            overflow: hidden;
+            overflow: visible;
+            /* Pochi campi: sempre tutti visibili, niente scrollbar */
+            max-height: none;
+            flex-shrink: 0;
         }
 
         .sidebar-extension-pane {
@@ -871,10 +1016,25 @@
         .modal-sidebar-panel.sidebar-expanded .sidebar-tools-list {
             width: 218px;
             flex-shrink: 0;
+            overflow: visible;
+            max-height: none;
         }
         .modal-sidebar-panel.sidebar-expanded .sidebar-extension-pane.active {
             display: flex;
             flex: 1;
+            min-height: 0;
+            max-height: calc(90vh - 100px);
+            overflow-y: auto;
+        }
+
+        #output-modal.tone-modal-fullscreen .modal-sidebar-panel.sidebar-expanded .sidebar-extension-pane.active {
+            max-height: calc(100% - 16px);
+        }
+
+        #sidebar-extension-body {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
         }
 
         .sidebar-extension-close {
@@ -896,25 +1056,35 @@
             color: #fff;
         }
 
-        .sidebar-item {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid var(--border-grey);
-            padding: 12px 16px;
-            border-radius: 8px;
+        .sidebar-item,
+        .sidebar-tree-btn {
+            background: transparent;
+            border: none;
+            padding: 8px 4px;
+            border-radius: 0;
             font-size: 13px;
             font-weight: 600;
+            font-family: inherit;
             color: #d4d4d8;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 10px;
+            width: 100%;
+            text-align: left;
             position: relative;
-            transition: all 0.3s ease;
+            transition: color 0.2s ease, opacity 0.2s ease;
         }
-        .sidebar-item:hover {
-            background: rgba(255, 255, 255, 0.05);
+        .sidebar-item:hover,
+        .sidebar-tree-btn:hover {
+            background: transparent;
             color: #fff;
-            border-color: #3f3f46;
+            border: none;
+        }
+        .sidebar-item:focus-visible,
+        .sidebar-tree-btn:focus-visible {
+            outline: 1px solid rgba(255, 255, 255, 0.25);
+            outline-offset: 2px;
         }
 
         /* Toast verde semitrasparente per conferma copia */
@@ -940,61 +1110,61 @@
             opacity: 1;
         }
 
-        /* Sezioni a fisarmonica (Accordion) */
-        .sidebar-group {
-            border: 1px solid var(--border-grey);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.01);
-            overflow: hidden;
+        /* Albero workspace (sempre aperto, senza accordion) */
+        .sidebar-tree {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin: 2px 0;
         }
 
-        .sidebar-group-header {
-            padding: 12px 16px;
-            font-size: 13px;
-            font-weight: 600;
-            color: #d4d4d8;
-            cursor: pointer;
+        .sidebar-tree-label {
             display: flex;
             align-items: center;
             gap: 10px;
-            transition: background 0.3s;
-        }
-        .sidebar-group-header:hover {
-            background: rgba(255, 255, 255, 0.03);
-            color: #fff;
-        }
-        .sidebar-group-header .arrow-indicator {
-            margin-left: auto;
-            font-size: 10px;
-            transition: transform 0.3s;
+            padding: 8px 4px 4px;
+            font-size: 12px;
+            font-weight: 700;
             color: var(--text-dim);
-        }
-        .sidebar-group-header .arrow-indicator.open {
-            transform: rotate(180deg);
-            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            pointer-events: none;
+            user-select: none;
         }
 
-        .sidebar-group-content {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease-out;
-            background: rgba(0, 0, 0, 0.2);
+        .sidebar-tree-label i {
+            color: #a1a1aa;
+            font-size: 12px;
+        }
+
+        .sidebar-tree-children {
             display: flex;
             flex-direction: column;
+            gap: 1px;
+            padding-left: 14px;
+            margin-left: 8px;
+            border-left: 1px solid #27272a;
         }
 
-        .sidebar-sub-item {
-            padding: 10px 16px 10px 40px;
+        .sidebar-tree-btn {
+            padding: 7px 8px 7px 10px;
             font-size: 12px;
-            color: var(--text-dim);
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            font-weight: 500;
+            color: #e4e4e7;
+            align-items: flex-start;
+            line-height: 1.35;
+            white-space: normal;
         }
-        .sidebar-sub-item:hover {
-            background: rgba(255, 255, 255, 0.02);
+
+        .sidebar-tree-btn i {
+            margin-top: 2px;
+            color: #a1a1aa;
+            flex-shrink: 0;
+            width: 14px;
+            text-align: center;
+        }
+
+        .sidebar-tree-btn:hover i {
             color: #fff;
         }
 
@@ -1503,7 +1673,7 @@
 </script>
 
 <header>
-    <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo" style="width: 110px; height: auto;">
+    <img src="/images/logo_senza_scritta_piccola.png" alt="PRISM Logo">
     <div class="nav-right">
         <span><i class="fas fa-search"></i> Archivio</span>
         <span id="adminNavLink" style="display:none" onclick="window.location.href='/admin'"><i class="fas fa-shield-alt"></i> Admin</span>
@@ -1530,9 +1700,9 @@
 
 <div class="settings-row" id="settingsRow">
     <div class="platform-pill">
-        <div class="pill" onclick="selP(this)"><i class="fab fa-facebook"></i> Facebook</div>
-        <div class="pill active" onclick="selP(this)"><i class="fab fa-linkedin"></i> LinkedIn</div>
-        <div class="pill" onclick="selP(this)">X</div>
+        <div class="pill" onclick="selP(this)"><i class="fab fa-facebook" aria-hidden="true"></i> Facebook</div>
+        <div class="pill active" onclick="selP(this)"><i class="fab fa-linkedin" aria-hidden="true"></i> LinkedIn</div>
+        <div class="pill" onclick="selP(this)"><i class="fab fa-x-twitter" aria-hidden="true"></i> X</div>
     </div>
     <div class="lang-pill" id="dashboardLangPill">
         <div class="pill lang-pill-option active" data-lang="italiano" onclick="selLang(this)">
@@ -1668,55 +1838,71 @@
 <!-- Modal Output Con Design Premium, Prisma 3D Vettoriale SVG e Glow Spettrale -->
 <div id="output-modal" class="modal-overlay" onclick="closeToneModal()">
     <div class="output-modal-box" id="output-modal-box" onclick="event.stopPropagation()">
-        <span onclick="closeToneModal()" style="position: absolute; top: 20px; right: 25px; color: var(--text-dim); cursor: pointer; font-size: 20px; z-index: 100;"><i class="fas fa-times"></i></span>
+        <div class="modal-chrome-actions">
+            <button type="button" class="modal-chrome-btn" data-action="expand" title="Espandi a pagina intera" onclick="expandToneModalFullscreen()">
+                <i class="fas fa-expand"></i>
+            </button>
+            <button type="button" class="modal-chrome-btn" data-action="restore" title="Torna alla modalità modale" onclick="restoreToneModalWindowed()">
+                <i class="fas fa-compress"></i>
+            </button>
+            <button type="button" class="modal-chrome-btn" data-action="dashboard" title="Torna alla dashboard" onclick="returnToDashboardFromToneModal()">
+                <i class="fas fa-th-large"></i>
+            </button>
+            <button type="button" class="modal-chrome-btn is-danger" data-action="close" title="Chiudi" onclick="closeToneModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
 
         <div class="modal-body-columns">
             <!-- SEZIONE SINISTRA: Workspace Sidebar -->
             <div id="modal-sidebar" class="modal-sidebar-panel">
-                <div class="sidebar-toggle-tab" id="sidebar-toggle-tab" onclick="toggleSidebarCollapse()" title="Collassa/Espandi sidebar">
-                    <i class="fas fa-chevron-left" id="sidebar-toggle-icon"></i>
-                </div>
-
                 <div class="sidebar-inner-row">
                     <div class="sidebar-tools-list">
                         <div class="sidebar-header"><i class="fas fa-tools"></i> Workspace</div>
 
-                        <div class="sidebar-item" onclick="copyModalText()">
+                        <button type="button" class="sidebar-item" onclick="copyModalText()">
                             <i class="far fa-copy"></i>
                             <span>Copia testo</span>
-                        </div>
+                        </button>
 
-                        <div class="sidebar-group">
-                            <div class="sidebar-group-header" onclick="toggleSidebarGroup('regen-options')">
+                        <div class="sidebar-tree">
+                            <div class="sidebar-tree-label">
                                 <i class="fas fa-sync-alt"></i>
                                 <span>Rigenerazione</span>
-                                <i class="fas fa-chevron-down arrow-indicator" id="arrow-regen-options"></i>
                             </div>
-                            <div class="sidebar-group-content" id="regen-options">
-                                <div class="sidebar-sub-item" onclick="openSidebarExtension('total-regen')">
-                                    <i class="fas fa-globe"></i> Rigenerazione totale
-                                </div>
-                                <div class="sidebar-sub-item" onclick="openSidebarExtension('instructions-regen')">
-                                    <i class="fas fa-comment-alt"></i> Con istruzioni
-                                </div>
+                            <div class="sidebar-tree-children">
+                                <button type="button" class="sidebar-tree-btn" onclick="openSidebarExtension('total-regen')">
+                                    <i class="fas fa-globe"></i>
+                                    <span>Rigenerazione totale</span>
+                                </button>
+                                <button type="button" class="sidebar-tree-btn" onclick="openSidebarExtension('instructions-regen')">
+                                    <i class="fas fa-comment-alt"></i>
+                                    <span>Con istruzioni</span>
+                                </button>
                             </div>
                         </div>
 
-                        <div class="sidebar-group">
-                            <div class="sidebar-group-header" onclick="toggleSidebarGroup('compare-options')">
+                        <div class="sidebar-tree">
+                            <div class="sidebar-tree-label">
                                 <i class="fas fa-columns"></i>
                                 <span>Confronta versioni</span>
-                                <i class="fas fa-chevron-down arrow-indicator" id="arrow-compare-options"></i>
                             </div>
-                            <div class="sidebar-group-content" id="compare-options">
-                                <div class="sidebar-sub-item" onclick="openSidebarExtension('compare-with-version')">
-                                    <i class="fas fa-code-branch"></i> Confronta con altra versione
-                                </div>
-                                <div class="sidebar-sub-item" onclick="openSidebarExtension('compare-with-tone')">
-                                    <i class="fas fa-exchange-alt"></i> Confronta con altro tono
-                                </div>
+                            <div class="sidebar-tree-children">
+                                <button type="button" class="sidebar-tree-btn" onclick="openSidebarExtension('compare-with-version')">
+                                    <i class="fas fa-code-branch"></i>
+                                    <span>Confronta con altra versione</span>
+                                </button>
+                                <button type="button" class="sidebar-tree-btn" onclick="openSidebarExtension('compare-with-tone')">
+                                    <i class="fas fa-exchange-alt"></i>
+                                    <span>Confronta con altro tono</span>
+                                </button>
                             </div>
                         </div>
+
+                        <button type="button" class="sidebar-item" onclick="openSidebarExtension('generation-details')">
+                            <i class="fas fa-info-circle"></i>
+                            <span>Dettagli generazione</span>
+                        </button>
                     </div>
 
                     <div class="sidebar-extension-pane" id="sidebar-extension-pane">
@@ -1728,10 +1914,9 @@
                 </div>
             </div>
 
-            <!-- SEZIONE DESTRA: Toolbar toni + Titolo fissi; solo il contenuto scorre -->
+            <!-- SEZIONE DESTRA: Toolbar toni fissa; solo il contenuto scorre -->
             <div class="modal-content-column">
                 <div id="modal-tone-switcher" class="modal-tone-switcher" aria-label="Selettore toni"></div>
-                <h2 id="modal-tone-title"></h2>
                 <div id="modal-tone-scroll" class="modal-tone-scroll">
                     <div id="modal-tone-text" style="line-height: 1.8; color: #e4e4e7; font-size: 15px; white-space: pre-wrap;"></div>
                     <div id="modal-tone-assets"></div>

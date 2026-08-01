@@ -1356,7 +1356,7 @@ async function finalizeToneGenerationReveal(toneKey, jobId, modalBox, titleEl, t
 // Avvia typewriter del contenuto tono dopo dissolve prisma (logica premium originale)
 function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, textEl) {
     if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout); // ferma typewriter precedente
-    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`; // titolo modale finale
+    if (titleEl) titleEl.innerText = ''; // titolo UI rimosso (tono nei metadati)
 
     textEl.innerHTML = ''; // svuota area testo
     const typewriterWrap = document.createElement('div'); // wrapper interno per typewriter
@@ -1379,6 +1379,7 @@ function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, tex
         modalToneSwitcherBusy = false;
         ensureModalToneSwitcherReady(toneKey);
         renderToneAssetsAndActions(toneKey); // galleria media sotto il testo
+        refreshModalToneMeta(toneKey); // allinea metadati alla versione appena rivelata
         if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight; // resta in fondo dopo media
         triggerUserGuidePhase5IfNeeded(); // guida freemium fase 5
     }, scrollEl); // auto-scroll solo dell'area testo
@@ -1997,7 +1998,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
     toneGenHasSeenGenerating = false;
     toneGenRevealStarted = false;
 
-    titleEl.innerText = `PRISM - Generazione in corso [${toneKey.toUpperCase()}]...`;
+    if (titleEl) titleEl.innerText = '';
     textEl.innerHTML = '';
     assetsEl.innerHTML = '';
 
@@ -2014,6 +2015,20 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
     modal.style.display = 'flex';
     renderModalToneSwitcher(toneKey);
     await ensureModalToneSwitcherReady(toneKey);
+
+    // Durante la generazione aggiorna snapshot metadati (visibile se pannello dettagli aperto)
+    const pendingInstructions = instructionsText
+        ? escapeHtmlCompare(instructionsText)
+        : '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+    setPendingModalToneMeta({
+        toneLabel: getToneDefinition(toneKey)?.label || toneKey,
+        language: formatModalMetaLanguage(options.linguaOutput || getSelectedDashboardLanguage()),
+        platform: formatModalMetaPlatform(options.piattaforma || getSelectedDashboardPlatform()),
+        topicFull: getCurrentTopicForModalMeta() || '—',
+        versionLabel: 'in aggiornamento…',
+        timestamp: '—',
+        instructionsHtml: pendingInstructions
+    });
 
     try {
         if (!userData.userId || !userData.companyId) {
@@ -2188,7 +2203,8 @@ async function displayToneModal(toneKey, toneText) {
 
     renderModalToneSwitcher(toneKey);
 
-    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
+    // Titolo UI rimosso: tono nei dettagli generazione a sinistra
+    if (titleEl) titleEl.innerText = '';
 
     const richHTMLContent = parseAndCleanContentForModal(toneText);
     textEl.innerHTML = `<div style="color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${richHTMLContent}</div>`;
@@ -2211,6 +2227,7 @@ async function displayToneModal(toneKey, toneText) {
     markToneAsGenerated(toneKey, true);
     await ensureModalToneSwitcherReady(toneKey);
     renderToneAssetsAndActions(toneKey);
+    refreshModalToneMeta(toneKey);
     modal.style.display = 'flex';
     triggerUserGuidePhase5IfNeeded();
     return true;
@@ -2249,15 +2266,245 @@ window.openToneModal = async function(toneKey) {
     }
 };
 
-window.closeToneModal = function() { 
-    document.getElementById('output-modal').style.display = 'none';
+/** Snapshot metadati versione corrente (per pannello estensione). */
+let latestModalToneMeta = null;
+/** Tool attualmente aperto nel pannello estensione sidebar. */
+let activeSidebarExtensionTool = null;
+
+window.closeToneModal = function() {
+    const modal = document.getElementById('output-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('tone-modal-fullscreen');
+    }
+    clearToneModalFullscreenLayout();
     if (userGuideCurrentPhase === 5) hideUserGuide();
     if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
     if (pollInterval) clearInterval(pollInterval);
     if (tonePollInterval) clearInterval(tonePollInterval);
     tonePollInterval = null;
     resetWorkspaceSidebarState();
+    resetModalToneMeta();
 };
+
+/** Calcola inset top/bottom così header e footer restano visibili in fullscreen. */
+function applyToneModalFullscreenLayout() {
+    const header = document.querySelector('header');
+    const footer = document.querySelector('.credits-footer');
+    const top = Math.ceil(header?.getBoundingClientRect().height || header?.offsetHeight || 72);
+    const bottom = Math.ceil(footer?.getBoundingClientRect().height || footer?.offsetHeight || 56);
+    document.documentElement.style.setProperty('--tone-fs-top', `${top}px`);
+    document.documentElement.style.setProperty('--tone-fs-bottom', `${bottom}px`);
+    document.body.classList.add('tone-modal-fullscreen-active');
+}
+
+function clearToneModalFullscreenLayout() {
+    document.body.classList.remove('tone-modal-fullscreen-active');
+    document.documentElement.style.removeProperty('--tone-fs-top');
+    document.documentElement.style.removeProperty('--tone-fs-bottom');
+}
+
+/** Espande la modale toni a pagina intera (tra header e footer dashboard). */
+window.expandToneModalFullscreen = function() {
+    const modal = document.getElementById('output-modal');
+    if (!modal || modal.style.display === 'none') return;
+    modal.classList.add('tone-modal-fullscreen');
+    applyToneModalFullscreenLayout();
+    // Ricalcola dopo paint (header fixed può cambiare altezza)
+    requestAnimationFrame(() => {
+        applyToneModalFullscreenLayout();
+        if (activeSidebarExtensionTool === 'generation-details') sizeGenerationDetailsTopicTextarea();
+    });
+};
+
+window.addEventListener('resize', () => {
+    const modal = document.getElementById('output-modal');
+    if (modal?.classList.contains('tone-modal-fullscreen')) {
+        applyToneModalFullscreenLayout();
+    }
+    if (activeSidebarExtensionTool === 'generation-details') {
+        sizeGenerationDetailsTopicTextarea();
+    }
+});
+
+/** Ripristina la modalità finestra (modale sopra la dashboard). */
+window.restoreToneModalWindowed = function() {
+    const modal = document.getElementById('output-modal');
+    if (!modal) return;
+    modal.classList.remove('tone-modal-fullscreen');
+    clearToneModalFullscreenLayout();
+};
+
+/**
+ * Torna alla dashboard chiudendo l'overlay, senza azzerare la sessione toni:
+ * cache/job restano pronti (modale "precaricata" al prossimo open).
+ */
+window.returnToDashboardFromToneModal = function() {
+    window.restoreToneModalWindowed();
+    const modal = document.getElementById('output-modal');
+    if (modal) modal.style.display = 'none';
+    if (userGuideCurrentPhase === 5) hideUserGuide();
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
+    resetWorkspaceSidebarState();
+};
+
+function resetModalToneMeta() {
+    latestModalToneMeta = null;
+}
+
+function formatModalMetaPlatform(platform) {
+    const raw = String(platform || '').toLowerCase().trim();
+    if (!raw || raw === '—') return '—';
+    if (raw.includes('linkedin')) return 'LinkedIn';
+    if (raw.includes('facebook')) return 'Facebook';
+    if (raw === 'x' || raw.includes('twitter')) return 'X';
+    return platform;
+}
+
+function formatModalMetaLanguage(language) {
+    const raw = String(language || '').toLowerCase().trim();
+    if (!raw || raw === '—') return '—';
+    const map = {
+        italiano: 'Italiano',
+        inglese: 'Inglese',
+        english: 'Inglese',
+        french: 'Francese',
+        francese: 'Francese',
+        spagnolo: 'Spagnolo',
+        spanish: 'Spagnolo',
+        tedesco: 'Tedesco',
+        german: 'Tedesco'
+    };
+    return map[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1));
+}
+
+function getCurrentTopicForModalMeta() {
+    const fromInput = (topicInputTextarea?.value || '').trim();
+    if (fromInput) return fromInput;
+    return '—';
+}
+
+function buildGenerationDetailsHtml(meta) {
+    if (!meta) {
+        return `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Dettagli generazione</h4>
+            <div class="generation-details-empty">Nessuna versione caricata</div>
+        `;
+    }
+
+    const instructions = meta.instructionsHtml
+        || '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+
+    return `
+        <h4 style="font-size:12px; color:#fff; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.5px;">Dettagli generazione</h4>
+        <div class="generation-details-panel" aria-live="polite">
+            <div class="meta-row"><strong>Tono:</strong> ${escapeHtmlCompare(meta.toneLabel || '—')}</div>
+            <div class="meta-row"><strong>Lingua:</strong> ${escapeHtmlCompare(meta.language || '—')}</div>
+            <div class="meta-row"><strong>Piattaforma:</strong> ${escapeHtmlCompare(meta.platform || '—')}</div>
+            <div class="generation-details-topic-wrap">
+                <label for="generation-details-topic">Argomento</label>
+                <textarea id="generation-details-topic" class="generation-details-topic" readonly>${escapeHtmlCompare(meta.topicFull || '—')}</textarea>
+            </div>
+            <div class="meta-row"><strong>Versione:</strong> ${escapeHtmlCompare(meta.versionLabel || '—')}</div>
+            <div class="meta-row"><strong>Timestamp:</strong> ${escapeHtmlCompare(meta.timestamp || '—')}</div>
+            <div class="meta-row"><strong>Istruzioni:</strong> ${instructions}</div>
+        </div>
+    `;
+}
+
+/** Dimensiona la textarea argomento in base allo spazio disponibile nel pannello. */
+function sizeGenerationDetailsTopicTextarea() {
+    const textarea = document.getElementById('generation-details-topic');
+    const body = document.getElementById('sidebar-extension-body');
+    const pane = document.getElementById('sidebar-extension-pane');
+    if (!textarea || !body) return;
+
+    const paneH = (pane?.clientHeight || body.clientHeight || 280);
+    // Usa circa il 35–45% dell'altezza pannello, con limiti ragionevoli
+    const maxH = Math.max(72, Math.min(Math.floor(paneH * 0.42), 280));
+    const minH = 56;
+
+    textarea.style.height = 'auto';
+    const contentH = textarea.scrollHeight || minH;
+    const nextH = Math.min(maxH, Math.max(minH, contentH));
+    textarea.style.height = `${nextH}px`;
+    textarea.style.overflowY = contentH > maxH ? 'auto' : 'hidden';
+}
+
+function renderGenerationDetailsExtension() {
+    const body = document.getElementById('sidebar-extension-body');
+    if (!body || activeSidebarExtensionTool !== 'generation-details') return;
+    body.innerHTML = buildGenerationDetailsHtml(latestModalToneMeta);
+    requestAnimationFrame(() => {
+        sizeGenerationDetailsTopicTextarea();
+        requestAnimationFrame(sizeGenerationDetailsTopicTextarea);
+    });
+}
+
+function setPendingModalToneMeta(partial) {
+    latestModalToneMeta = {
+        toneLabel: partial.toneLabel || '—',
+        language: partial.language || '—',
+        platform: partial.platform || '—',
+        topicFull: partial.topicFull || getCurrentTopicForModalMeta() || '—',
+        versionLabel: partial.versionLabel || 'in aggiornamento…',
+        timestamp: partial.timestamp || '—',
+        instructionsHtml: partial.instructionsHtml
+            || '<em style="opacity:0.7">Nessuna istruzione manuale</em>'
+    };
+    renderGenerationDetailsExtension();
+}
+
+/**
+ * Aggiorna lo snapshot metadati della versione corrente visualizzata.
+ * Se il pannello "Dettagli generazione" è aperto, lo rinfresca.
+ */
+async function refreshModalToneMeta(toneKey) {
+    const key = toneKey || currentActiveToneKey;
+    if (!key) {
+        latestModalToneMeta = null;
+        renderGenerationDetailsExtension();
+        return;
+    }
+
+    try {
+        const versions = await fetchToneVersionsForCompare(key);
+        const current = resolveCompareBaseline(versions);
+
+        const platform = formatModalMetaPlatform(
+            current?.platform && current.platform !== '—'
+                ? current.platform
+                : getSelectedDashboardPlatform()
+        );
+        const language = formatModalMetaLanguage(
+            current?.language && current.language !== '—'
+                ? current.language
+                : getSelectedDashboardLanguage()
+        );
+        const topicFull = getCurrentTopicForModalMeta() || '—';
+        const toneLabel = getToneDefinition(key)?.label || key;
+        const versionLabel = current?.version != null ? `v${current.version}` : '—';
+        const timestamp = formatCompareDate(current?.createdAt);
+        const instructionsHtml = current?.instructions
+            ? escapeHtmlCompare(current.instructions)
+            : '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+
+        latestModalToneMeta = {
+            toneLabel,
+            language,
+            platform,
+            topicFull,
+            versionLabel,
+            timestamp,
+            instructionsHtml
+        };
+        renderGenerationDetailsExtension();
+    } catch (err) {
+        console.warn('[PRISM META] Aggiornamento metadati fallito:', err?.message || err);
+        latestModalToneMeta = null;
+        renderGenerationDetailsExtension();
+    }
+}
 
 function parseAndCleanContentForModal(text) {
     if (!text) return "";
@@ -2286,44 +2533,13 @@ function resetWorkspaceSidebarState() {
     const sidebar = document.getElementById('modal-sidebar');
     const extensionPane = document.getElementById('sidebar-extension-pane');
     const extensionBody = document.getElementById('sidebar-extension-body');
-    const regenContent = document.getElementById('regen-options');
-    const regenArrow = document.getElementById('arrow-regen-options');
-    const compareContent = document.getElementById('compare-options');
-    const compareArrow = document.getElementById('arrow-compare-options');
 
     closeSidebarExtension();
     if (typeof closeCompareDiffModal === 'function') closeCompareDiffModal();
-    if (sidebar) sidebar.classList.remove('sidebar-collapsed', 'sidebar-expanded');
+    if (sidebar) sidebar.classList.remove('sidebar-expanded');
     if (extensionBody) extensionBody.innerHTML = '';
     if (extensionPane) extensionPane.classList.remove('active');
-    if (regenContent) regenContent.style.maxHeight = '0px';
-    if (regenArrow) regenArrow.classList.remove('open');
-    if (compareContent) compareContent.style.maxHeight = '0px';
-    if (compareArrow) compareArrow.classList.remove('open');
 }
-
-window.toggleSidebarCollapse = function() {
-    const sidebar = document.getElementById('modal-sidebar');
-    const modalBox = document.getElementById('output-modal-box');
-    if (!sidebar || !modalBox?.classList.contains('completed-glow')) return;
-
-    sidebar.classList.toggle('sidebar-collapsed');
-    if (sidebar.classList.contains('sidebar-collapsed')) closeSidebarExtension();
-};
-
-window.toggleSidebarGroup = function(groupId) {
-    const content = document.getElementById(groupId);
-    const arrow = document.getElementById(`arrow-${groupId}`);
-    if (!content) return;
-
-    if (content.style.maxHeight && content.style.maxHeight !== '0px') {
-        content.style.maxHeight = '0px';
-        if (arrow) arrow.classList.remove('open');
-    } else {
-        content.style.maxHeight = content.scrollHeight + 'px';
-        if (arrow) arrow.classList.add('open');
-    }
-};
 
 window.copyModalText = function() {
     const textEl = document.getElementById('modal-tone-text');
@@ -2345,9 +2561,9 @@ window.copyModalText = function() {
 function buildOverlayPlatformPillsHtml() {
     const currentPlatform = document.querySelector('#settingsRow .platform-pill .pill.active')?.innerText.trim() || 'LinkedIn';
     const platforms = [
-        { label: 'Facebook', html: '<i class="fab fa-facebook"></i> Facebook' },
-        { label: 'LinkedIn', html: '<i class="fab fa-linkedin"></i> LinkedIn' },
-        { label: 'X', html: 'X' }
+        { label: 'Facebook', html: '<i class="fab fa-facebook" aria-hidden="true"></i> Facebook' },
+        { label: 'LinkedIn', html: '<i class="fab fa-linkedin" aria-hidden="true"></i> LinkedIn' },
+        { label: 'X', html: '<i class="fab fa-x-twitter" aria-hidden="true"></i> X' }
     ];
     return platforms.map((p) => {
         const activeClass = p.label === currentPlatform ? ' active' : '';
@@ -2378,10 +2594,7 @@ window.openSidebarExtension = function(toolType) {
     const body = document.getElementById('sidebar-extension-body');
     if (!sidebar || !extensionPane || !body) return;
 
-    if (sidebar.classList.contains('sidebar-collapsed')) {
-        sidebar.classList.remove('sidebar-collapsed');
-    }
-
+    activeSidebarExtensionTool = toolType;
     sidebar.classList.add('sidebar-expanded');
     extensionPane.classList.add('active');
 
@@ -2420,6 +2633,14 @@ window.openSidebarExtension = function(toolType) {
             <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta con altro tono</h4>
             <div class="compare-version-empty">Funzionalità in arrivo: confronto tra toni diversi sullo stesso argomento.</div>
         `;
+    } else if (toolType === 'generation-details') {
+        body.innerHTML = buildGenerationDetailsHtml(latestModalToneMeta);
+        requestAnimationFrame(() => {
+            sizeGenerationDetailsTopicTextarea();
+            requestAnimationFrame(sizeGenerationDetailsTopicTextarea);
+        });
+        // Assicura dati aggiornati alla versione corrente
+        refreshModalToneMeta(currentActiveToneKey);
     }
 };
 
@@ -2428,6 +2649,7 @@ window.closeSidebarExtension = function() {
     const extensionPane = document.getElementById('sidebar-extension-pane');
     const body = document.getElementById('sidebar-extension-body');
 
+    activeSidebarExtensionTool = null;
     if (sidebar) sidebar.classList.remove('sidebar-expanded');
     if (extensionPane) extensionPane.classList.remove('active');
     if (body) body.innerHTML = '';
