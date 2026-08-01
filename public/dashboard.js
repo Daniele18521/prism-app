@@ -2358,12 +2358,12 @@ function buildOverlayPlatformPillsHtml() {
 function buildOverlayLanguagePillsHtml() {
     const currentLang = getSelectedDashboardLanguage();
     const languages = [
-        { id: 'italiano', flag: '🇮🇹', label: 'Italiano' },
-        { id: 'english', flag: '🇬🇧', label: 'English' }
+        { id: 'italiano', flagCode: 'it', label: 'Italiano' },
+        { id: 'english', flagCode: 'gb', label: 'English' }
     ];
     return languages.map((lang) => {
         const activeClass = lang.id === currentLang ? ' active' : '';
-        return `<div class="pill lang-pill-option${activeClass}" data-lang="${lang.id}" onclick="selOverlayLang(this)"><span class="lang-flag" aria-hidden="true">${lang.flag}</span> ${lang.label}</div>`;
+        return `<div class="pill lang-pill-option${activeClass}" data-lang="${lang.id}" onclick="selOverlayLang(this)"><span class="lang-flag" aria-hidden="true"><img class="lang-flag-img" src="https://flagcdn.com/w40/${lang.flagCode}.png" width="18" height="13" alt=""></span> ${lang.label}</div>`;
     }).join('');
 }
 
