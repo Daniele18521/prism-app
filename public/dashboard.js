@@ -71,7 +71,7 @@ const charCounterDisplay = document.getElementById('charCounter');
 const btnGenerate = document.querySelector('.generate-btn');
 const btnReset = document.querySelector('.reset-btn');
 const settingsRow = document.querySelector('.settings-row');
-const maxCharacterLength = 2000;
+const maxCharacterLength = 4000;
 const MIN_WORDS_FOR_ANALYZE = 5;
 const CHAR_COUNTER_WARN_THRESHOLD = 100;
 let inputUnlockedByPaste = false;
@@ -857,29 +857,6 @@ function normalizeToneVersions(versions) {
     return []; // formato non riconosciuto
 }
 
-<<<<<<< HEAD
-// Testo tono dalla cache locale (stessa struttura versions)
-function getToneTextFromCache(toneKey) {
-    return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
-}
-=======
-// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
-function extractTextFromToneEntry(entry) {
-    if (!entry) return ''; // voce assente
-    if (typeof entry === 'string') return entry; // testo grezzo diretto
-    if (typeof entry.text === 'string' && entry.text) return entry.text; // .text legacy flat
-    if (typeof entry.content === 'string' && entry.content) return entry.content; // .content fallback
-    const versionList = normalizeToneVersions(entry.versions); // lista versioni
-    if (versionList.length === 0) return ''; // nessuna versione con testo
-    const latest = versionList.reduce((best, version) => { // ultima per createdAt
-        if (!best) return version; // prima versione
-        const bestTs = best.createdAt ? new Date(best.createdAt).getTime() : -1; // timestamp best
-        const curTs = version.createdAt ? new Date(version.createdAt).getTime() : -1; // timestamp corrente
-        return curTs >= bestTs ? version : best; // preferisci la più recente
-    }, null);
-    return latest?.text || latest?.content || ''; // testo ultima versione
-}
-
 /**
  * Recupera il tono da Firestore (ultima versione) e idrata la sessione UI.
  * Ritorna { status: 'ok'|'missing'|'error', text?, message?, result? }
@@ -894,7 +871,6 @@ async function resolveToneContentFromFirestore(jobId, toneKey) {
     if (!toneKey) {
         return { status: 'error', message: 'Tono non valido.' };
     }
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
 
     try {
         const fetchResult = await fetchLatestToneFromFirestore(jobId, toneKey);
@@ -968,6 +944,36 @@ function extractTextFromToneEntry(entry) {
     if (typeof entry.text === 'string' && entry.text) return entry.text;
     if (typeof entry.content === 'string' && entry.content) return entry.content;
     return '';
+}
+
+// Testo tono dalla cache locale (stessa struttura versions)
+function getToneTextFromCache(toneKey) {
+    return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
+}
+
+// true se il tono è già in cache con testo leggibile
+function hasToneInCache(toneKey) {
+    return Boolean(getToneTextFromCache(toneKey).trim()); // testo non vuoto
+}
+
+// Estrae testo tono dal payload job Redis (per typewriter — NON blocca il dissolve)
+function getToneTextFromJob(jobData, toneKey) {
+    if (!jobData || !toneKey) return ''; // guard
+    const tones = extractTonesFromJob(jobData); // oggetto tones root
+    const entry = findToneEntry(tones, toneKey); // tones.provocatore
+    return extractTextFromToneEntry(entry); // versions[n].text
+}
+
+// Salva tones + media in sessione locale dopo generazione F4 (fallback se Firestore non ancora sincronizzato)
+function cacheToneGenerationResult(task) {
+    const tones = extractTonesFromJob(task); // tones dal job
+    globalCacheTones = { ...globalCacheTones, ...tones }; // merge toni in sessione
+    const assets = extractAllDatabaseAssets(task); // immagini + fonti
+    globalCacheMedia = {
+        verifiedImages: assets.images || [], // formato atteso da renderToneAssetsAndActions
+        verifiedTables: [],
+        sourcesPreview: assets.sources || []
+    };
 }
 
 function findStoricoEntries(storico, toneKey) {
@@ -1120,7 +1126,6 @@ async function fetchLatestToneFromFirestoreWithRetry(jobId, toneKey, attempts = 
 function applyFirestoreToneToSession(toneKey, fetchResult) {
     if (!fetchResult?.found || !fetchResult.entry) return false;
 
-<<<<<<< HEAD
     // Mantieni struttura completa con versions[] se disponibile dal documento
     const toneFromDoc = findToneEntry(extractTonesFromJob(fetchResult.contentData || {}), toneKey);
     if (toneFromDoc && normalizeToneVersions(toneFromDoc.versions).length) {
@@ -1129,10 +1134,6 @@ function applyFirestoreToneToSession(toneKey, fetchResult) {
         globalCacheTones[toneKey] = fetchResult.entry;
     }
 
-=======
-    // Idratazione sessione UI (non usata come sorgente dati — Firestore resta l'unica fonte)
-    globalCacheTones[toneKey] = fetchResult.entry;
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
     const assets = extractAllDatabaseAssets(fetchResult.contentData || {});
     globalCacheMedia = {
         verifiedImages: assets.images || [],
@@ -1976,18 +1977,6 @@ function unlockDashboardLanguageSelection() {
  * @param {string} jobId
  * @param {{ piattaforma?: string, linguaOutput?: string }} [options] — override selezione dashboard
  */
-<<<<<<< HEAD
-async function generateSingleToneWithInteractivePrism(toneKey, jobId, platform, language, instructions) {
-    const modal = document.getElementById('output-modal'); // modale output tono
-    const modalBox = document.getElementById('output-modal-box'); // box contenuto
-    const titleEl = document.getElementById('modal-tone-title'); // titolo modale
-    const textEl = document.getElementById('modal-tone-text'); // area testo
-    const assetsEl = document.getElementById('modal-tone-assets'); // area media
-
-    const userData = getCurrentUserData(); // uid + companyId
-    const BACKEND_URL = getBackendUrl(); // URL backend BullMQ
-    const instructionsText = String(instructions || '').trim().slice(0, 100); // istruzioni manuali (max 100)
-=======
 async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = {}) {
     const modal = document.getElementById('output-modal');
     const modalBox = document.getElementById('output-modal-box');
@@ -1997,7 +1986,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
 
     const userData = getCurrentUserData();
     const BACKEND_URL = getBackendUrl();
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
+    const instructionsText = String(options.instructions || '').trim().slice(0, 100);
 
     currentActiveToneKey = toneKey;
     modalToneSwitcherBusy = true;
@@ -2015,16 +2004,10 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
     resetWorkspaceSidebarState();
     applyOutputModalToneTheme(toneKey);
     if (modalBox) {
-<<<<<<< HEAD
         modalBox.classList.remove('completed-glow'); // rimuove glow
         modalBox.style.overflow = 'hidden'; // cornice fissa (scroll solo su #modal-tone-scroll)
         modalBox.style.width = ''; // forza dimensioni CSS fisse (950px / 90vh)
         modalBox.style.height = ''; // evita altezza inline residua
-=======
-        modalBox.style.width = '750px';
-        modalBox.classList.remove('completed-glow');
-        modalBox.style.overflowY = 'hidden';
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
     }
 
     openToneGenPrismLoader(TONE_GEN_STEP_LABELS.generation, 0.90);
@@ -2033,22 +2016,6 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
     await ensureModalToneSwitcherReady(toneKey);
 
     try {
-<<<<<<< HEAD
-        const response = await fetch(`${BACKEND_URL}/api/regenerate-tone-surgical`, { // avvia F4
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                userId: userData.userId,
-                companyId: userData.companyId,
-                toneKey: toneKey,
-                jobId: jobId,
-                platform: platform,
-                language: language || getSelectedDashboardLanguage(),
-                // Alias IT/EN: il mock/backend salvano versions[].instructions
-                instructions: instructionsText,
-                istruzioniAggiuntive: instructionsText
-            })
-=======
         if (!userData.userId || !userData.companyId) {
             throw new Error('Profilo utente non sincronizzato. Attendi il caricamento o ricarica la pagina.');
         }
@@ -2060,8 +2027,13 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
             toneKey,
             piattaforma: options.piattaforma,
             linguaOutput: options.linguaOutput
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
         });
+
+        // Alias IT/EN: il mock/backend salvano versions[].instructions
+        if (instructionsText) {
+            payload.instructions = instructionsText;
+            payload.istruzioniAggiuntive = instructionsText;
+        }
 
         console.log('[PRISM] Avvio generazione tono:', {
             tono: payload.tono,
@@ -2227,16 +2199,10 @@ async function displayToneModal(toneKey, toneText) {
         prismBg.style.display = 'none';
     }
     if (modalBox) {
-<<<<<<< HEAD
         modalBox.classList.add('completed-glow');
         modalBox.style.overflow = 'hidden'; // cornice fissa; scorre solo #modal-tone-scroll
         modalBox.style.width = ''; // dimensioni fisse da CSS
         modalBox.style.height = '';
-=======
-        modalBox.style.width = '950px';
-        modalBox.classList.add('completed-glow');
-        modalBox.style.overflowY = 'auto';
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
     }
 
     const scrollEl = document.getElementById('modal-tone-scroll');
@@ -2826,7 +2792,6 @@ window.executeSurgicalRegen = function(type) {
         language = getSelectedOverlayLanguage();
     }
 
-<<<<<<< HEAD
     // Cattura istruzioni PRIMA di chiudere il pannello (il DOM del textarea viene distrutto)
     const instructions = type === 'instructions'
         ? (document.getElementById('overlay-instructions-input')?.value.trim() || '')
@@ -2836,11 +2801,7 @@ window.executeSurgicalRegen = function(type) {
         return showPrismErrorSafe('Inserisci le istruzioni manuali prima di rigenerare.', { title: 'Istruzioni mancanti' });
     }
 
-    console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platform}, lingua: ${language}, istruzioni: ${instructions || '(nessuna)'}`);
-=======
-    const instructions = document.getElementById('overlay-instructions-input')?.value.trim() || '';
     console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platformLabel}, lingua: ${language}, istruzioni: ${instructions || '(nessuna)'}`);
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
 
     closeSidebarExtension();
 
@@ -2849,14 +2810,11 @@ window.executeSurgicalRegen = function(type) {
         return showPrismErrorSafe('Impossibile rigenerare: sessione analisi non valida.');
     }
 
-<<<<<<< HEAD
-    generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, platform, language, instructions);
-=======
     generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, {
         piattaforma: normalizePlatformLabelToApi(platformLabel),
-        linguaOutput: language
+        linguaOutput: language,
+        instructions
     });
->>>>>>> 96652a62dc75c2bc5a34be1a7bd5e8ad84ef3003
 };
 
 // ==========================================
