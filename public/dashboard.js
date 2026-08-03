@@ -71,7 +71,7 @@ const charCounterDisplay = document.getElementById('charCounter');
 const btnGenerate = document.querySelector('.generate-btn');
 const btnReset = document.querySelector('.reset-btn');
 const settingsRow = document.querySelector('.settings-row');
-const maxCharacterLength = 2000;
+const maxCharacterLength = 4000;
 const MIN_WORDS_FOR_ANALYZE = 5;
 const CHAR_COUNTER_WARN_THRESHOLD = 100;
 let inputUnlockedByPaste = false;
@@ -857,23 +857,6 @@ function normalizeToneVersions(versions) {
     return []; // formato non riconosciuto
 }
 
-// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
-function extractTextFromToneEntry(entry) {
-    if (!entry) return ''; // voce assente
-    if (typeof entry === 'string') return entry; // testo grezzo diretto
-    if (typeof entry.text === 'string' && entry.text) return entry.text; // .text legacy flat
-    if (typeof entry.content === 'string' && entry.content) return entry.content; // .content fallback
-    const versionList = normalizeToneVersions(entry.versions); // lista versioni
-    if (versionList.length === 0) return ''; // nessuna versione con testo
-    const latest = versionList.reduce((best, version) => { // ultima per createdAt
-        if (!best) return version; // prima versione
-        const bestTs = best.createdAt ? new Date(best.createdAt).getTime() : -1; // timestamp best
-        const curTs = version.createdAt ? new Date(version.createdAt).getTime() : -1; // timestamp corrente
-        return curTs >= bestTs ? version : best; // preferisci la più recente
-    }, null);
-    return latest?.text || latest?.content || ''; // testo ultima versione
-}
-
 /**
  * Recupera il tono da Firestore (ultima versione) e idrata la sessione UI.
  * Ritorna { status: 'ok'|'missing'|'error', text?, message?, result? }
@@ -911,11 +894,86 @@ function delay(ms) {
 
 function getToneVersionTimestampMs(entry) {
     if (!entry) return -1;
+    // Firestore Timestamp nativo
+    if (entry.createdAt?.toDate) return entry.createdAt.toDate().getTime();
     if (entry.timestamp?.toDate) return entry.timestamp.toDate().getTime();
     if (entry.updatedAt?.toDate) return entry.updatedAt.toDate().getTime();
-    if (entry.createdAt) return new Date(entry.createdAt).getTime();
-    if (entry.updatedAt) return new Date(entry.updatedAt).getTime();
+    // Timestamp serializzato { seconds, nanoseconds }
+    const tsLike = entry.createdAt || entry.timestamp || entry.updatedAt;
+    if (tsLike && typeof tsLike === 'object' && tsLike.seconds != null) {
+        return Number(tsLike.seconds) * 1000 + Math.floor(Number(tsLike.nanoseconds || 0) / 1e6);
+    }
+    if (entry.createdAt) {
+        const ms = new Date(entry.createdAt).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    }
+    if (entry.updatedAt) {
+        const ms = new Date(entry.updatedAt).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    }
     return -1;
+}
+
+// Preferisce version numerica più alta, poi createdAt più recente
+function pickNewestVersionEntry(versionList) {
+    if (!versionList || !versionList.length) return null;
+    return versionList.reduce((best, current) => {
+        if (!best) return current;
+        const bestV = Number(best.version) || 0;
+        const curV = Number(current.version) || 0;
+        if (curV !== bestV) return curV > bestV ? current : best;
+        const bestTs = getToneVersionTimestampMs(best);
+        const curTs = getToneVersionTimestampMs(current);
+        return curTs >= bestTs ? current : best;
+    }, null);
+}
+
+// Estrae il testo da una voce tono: tones[toneKey].versions[n].text (ultima versione)
+function extractTextFromToneEntry(entry) {
+    if (!entry) return ''; // voce assente
+    if (typeof entry === 'string') return entry; // testo grezzo diretto
+
+    // Se ha versions[], la bozza attiva è SEMPRE l'ultima (non il text root legacy)
+    const versionList = normalizeToneVersions(entry.versions);
+    if (versionList.length > 0) {
+        const latest = pickNewestVersionEntry(versionList);
+        return latest?.text || latest?.content || '';
+    }
+
+    // Singola entry versione (cache post-FS) oppure legacy flat
+    if (typeof entry.text === 'string' && entry.text) return entry.text;
+    if (typeof entry.content === 'string' && entry.content) return entry.content;
+    return '';
+}
+
+// Testo tono dalla cache locale (stessa struttura versions)
+function getToneTextFromCache(toneKey) {
+    return extractTextFromToneEntry(findToneEntry(globalCacheTones, toneKey)); // tones[toneKey].versions[n].text
+}
+
+// true se il tono è già in cache con testo leggibile
+function hasToneInCache(toneKey) {
+    return Boolean(getToneTextFromCache(toneKey).trim()); // testo non vuoto
+}
+
+// Estrae testo tono dal payload job Redis (per typewriter — NON blocca il dissolve)
+function getToneTextFromJob(jobData, toneKey) {
+    if (!jobData || !toneKey) return ''; // guard
+    const tones = extractTonesFromJob(jobData); // oggetto tones root
+    const entry = findToneEntry(tones, toneKey); // tones.provocatore
+    return extractTextFromToneEntry(entry); // versions[n].text
+}
+
+// Salva tones + media in sessione locale dopo generazione F4 (fallback se Firestore non ancora sincronizzato)
+function cacheToneGenerationResult(task) {
+    const tones = extractTonesFromJob(task); // tones dal job
+    globalCacheTones = { ...globalCacheTones, ...tones }; // merge toni in sessione
+    const assets = extractAllDatabaseAssets(task); // immagini + fonti
+    globalCacheMedia = {
+        verifiedImages: assets.images || [], // formato atteso da renderToneAssetsAndActions
+        verifiedTables: [],
+        sourcesPreview: assets.sources || []
+    };
 }
 
 function findStoricoEntries(storico, toneKey) {
@@ -938,37 +996,32 @@ function collectAllToneVersionsFromDoc(docData, toneKey) {
 
     roots.forEach((root) => {
         const currentEntry = findToneEntry(root.tones || extractTonesFromJob(root), toneKey);
-        if (currentEntry) candidates.push(currentEntry);
+        if (currentEntry) {
+            // Espandi versions[] in candidati singoli (bozze reali)
+            const nested = normalizeToneVersions(currentEntry.versions);
+            if (nested.length) {
+                nested.forEach((v) => candidates.push(v));
+            } else {
+                // legacy: entry flat con text
+                candidates.push(currentEntry);
+            }
+        }
         candidates.push(...findStoricoEntries(root.storico, toneKey));
     });
 
     const rootTones = extractTonesFromJob(docData);
     const rootEntry = findToneEntry(rootTones, toneKey);
-    if (rootEntry) candidates.push(rootEntry);
+    if (rootEntry) {
+        const nested = normalizeToneVersions(rootEntry.versions);
+        if (nested.length) nested.forEach((v) => candidates.push(v));
+        else candidates.push(rootEntry);
+    }
 
     return candidates;
 }
 
 function pickLatestToneVersion(versions) {
-    if (!versions.length) return null;
-
-    return versions.reduce((best, current) => {
-        if (!best) return current;
-
-        const bestVersion = Number(best.version) || 0;
-        const currentVersion = Number(current.version) || 0;
-        if (currentVersion !== bestVersion) {
-            return currentVersion > bestVersion ? current : best;
-        }
-
-        const bestTs = getToneVersionTimestampMs(best);
-        const currentTs = getToneVersionTimestampMs(current);
-        if (bestTs !== currentTs) return currentTs > bestTs ? current : best;
-
-        const bestTextLen = (extractTextFromToneEntry(best) || '').length;
-        const currentTextLen = (extractTextFromToneEntry(current) || '').length;
-        return currentTextLen >= bestTextLen ? current : best;
-    }, null);
+    return pickNewestVersionEntry(versions);
 }
 
 function mapFirestoreToneError(err) {
@@ -1073,8 +1126,14 @@ async function fetchLatestToneFromFirestoreWithRetry(jobId, toneKey, attempts = 
 function applyFirestoreToneToSession(toneKey, fetchResult) {
     if (!fetchResult?.found || !fetchResult.entry) return false;
 
-    // Idratazione sessione UI (non usata come sorgente dati — Firestore resta l'unica fonte)
-    globalCacheTones[toneKey] = fetchResult.entry;
+    // Mantieni struttura completa con versions[] se disponibile dal documento
+    const toneFromDoc = findToneEntry(extractTonesFromJob(fetchResult.contentData || {}), toneKey);
+    if (toneFromDoc && normalizeToneVersions(toneFromDoc.versions).length) {
+        globalCacheTones[toneKey] = toneFromDoc;
+    } else {
+        globalCacheTones[toneKey] = fetchResult.entry;
+    }
+
     const assets = extractAllDatabaseAssets(fetchResult.contentData || {});
     globalCacheMedia = {
         verifiedImages: assets.images || [],
@@ -1297,25 +1356,33 @@ async function finalizeToneGenerationReveal(toneKey, jobId, modalBox, titleEl, t
 // Avvia typewriter del contenuto tono dopo dissolve prisma (logica premium originale)
 function startToneContentReveal(toneKey, richHTMLContent, modalBox, titleEl, textEl) {
     if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout); // ferma typewriter precedente
-    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`; // titolo modale finale
+    if (titleEl) titleEl.innerText = ''; // titolo UI rimosso (tono nei metadati)
 
     textEl.innerHTML = ''; // svuota area testo
     const typewriterWrap = document.createElement('div'); // wrapper interno per typewriter
     typewriterWrap.style.cssText = 'color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;'; // stile contenuto
     textEl.appendChild(typewriterWrap); // monta wrapper in #modal-tone-text
 
+    // Scroll SOLO sull'area contenuto (#modal-tone-scroll): switcher/titolo/sidebar restano fissi
+    const scrollEl = document.getElementById('modal-tone-scroll');
+    if (modalBox) modalBox.style.overflow = 'hidden'; // la cornice modale non scorre mai
+    if (scrollEl) scrollEl.scrollTop = 0; // riparti dall'alto all'inizio scrittura
+
     typewriterHTML(typewriterWrap, richHTMLContent, 18, () => { // macchina da scrivere sul wrapper
-        if (modalBox) { // espande modale a fine scrittura
-            modalBox.style.width = '950px'; // larghezza contenuto + sidebar
+        if (modalBox) { // glow a fine scrittura (altezza/larghezza restano fisse)
             modalBox.classList.add('completed-glow'); // glow perimetrale tono
-            modalBox.style.overflowY = 'auto'; // abilita scroll
+            modalBox.style.overflow = 'hidden'; // cornice fissa anche a fine scrittura
+            modalBox.style.width = ''; // ripristina width CSS
+            modalBox.style.height = ''; // ripristina height CSS
         }
         markToneAsGenerated(toneKey, true);
         modalToneSwitcherBusy = false;
         ensureModalToneSwitcherReady(toneKey);
         renderToneAssetsAndActions(toneKey); // galleria media sotto il testo
+        refreshModalToneMeta(toneKey); // allinea metadati alla versione appena rivelata
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight; // resta in fondo dopo media
         triggerUserGuidePhase5IfNeeded(); // guida freemium fase 5
-    });
+    }, scrollEl); // auto-scroll solo dell'area testo
 }
 
 // ==========================================
@@ -1920,6 +1987,7 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
 
     const userData = getCurrentUserData();
     const BACKEND_URL = getBackendUrl();
+    const instructionsText = String(options.instructions || '').trim().slice(0, 100);
 
     currentActiveToneKey = toneKey;
     modalToneSwitcherBusy = true;
@@ -1930,22 +1998,37 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
     toneGenHasSeenGenerating = false;
     toneGenRevealStarted = false;
 
-    titleEl.innerText = `PRISM - Generazione in corso [${toneKey.toUpperCase()}]...`;
+    if (titleEl) titleEl.innerText = '';
     textEl.innerHTML = '';
     assetsEl.innerHTML = '';
 
     resetWorkspaceSidebarState();
     applyOutputModalToneTheme(toneKey);
     if (modalBox) {
-        modalBox.style.width = '750px';
-        modalBox.classList.remove('completed-glow');
-        modalBox.style.overflowY = 'hidden';
+        modalBox.classList.remove('completed-glow'); // rimuove glow
+        modalBox.style.overflow = 'hidden'; // cornice fissa (scroll solo su #modal-tone-scroll)
+        modalBox.style.width = ''; // forza dimensioni CSS fisse (950px / 90vh)
+        modalBox.style.height = ''; // evita altezza inline residua
     }
 
     openToneGenPrismLoader(TONE_GEN_STEP_LABELS.generation, 0.90);
     modal.style.display = 'flex';
     renderModalToneSwitcher(toneKey);
     await ensureModalToneSwitcherReady(toneKey);
+
+    // Durante la generazione aggiorna snapshot metadati (visibile se pannello dettagli aperto)
+    const pendingInstructions = instructionsText
+        ? escapeHtmlCompare(instructionsText)
+        : '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+    setPendingModalToneMeta({
+        toneLabel: getToneDefinition(toneKey)?.label || toneKey,
+        language: formatModalMetaLanguage(options.linguaOutput || getSelectedDashboardLanguage()),
+        platform: formatModalMetaPlatform(options.piattaforma || getSelectedDashboardPlatform()),
+        topicFull: getCurrentTopicForModalMeta() || '—',
+        versionLabel: 'in aggiornamento…',
+        timestamp: '—',
+        instructionsHtml: pendingInstructions
+    });
 
     try {
         if (!userData.userId || !userData.companyId) {
@@ -1960,6 +2043,12 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
             piattaforma: options.piattaforma,
             linguaOutput: options.linguaOutput
         });
+
+        // Alias IT/EN: il mock/backend salvano versions[].instructions
+        if (instructionsText) {
+            payload.instructions = instructionsText;
+            payload.istruzioniAggiuntive = instructionsText;
+        }
 
         console.log('[PRISM] Avvio generazione tono:', {
             tono: payload.tono,
@@ -2003,11 +2092,18 @@ async function generateSingleToneWithInteractivePrism(toneKey, jobId, options = 
 
 /**
  * Gestisce l'effetto typewriter saltando i tag HTML per evitare sfarfallii visivi o stampe di codice grezzo.
+ * Se scrollContainer è passato, tiene in vista la fine del testo mentre cresce oltre l'altezza della modale.
  */
-function typewriterHTML(element, html, speed, callback) {
+function typewriterHTML(element, html, speed, callback, scrollContainer) {
     if (!element) { if (callback) callback(); return; } // target mancante
     let currentHtml = ''; // HTML accumulato carattere per carattere
     let i = 0; // indice posizione nella stringa
+
+    function keepLatestTextVisible() {
+        if (!scrollContainer) return; // nessun contenitore scrollabile
+        // porta in vista la riga appena scritta (parte superiore scorre verso l'alto)
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
 
     function step() {
         if (i < html.length) { // caratteri rimanenti
@@ -2025,8 +2121,10 @@ function typewriterHTML(element, html, speed, callback) {
                 i++; // avanza
             }
             element.innerHTML = currentHtml; // renderizza HTML parziale
+            keepLatestTextVisible(); // auto-scroll verso il fondo
             activeTypewriterTimeout = setTimeout(step, speed); // prossimo carattere
         } else { // scrittura completata
+            keepLatestTextVisible(); // assicura fine testo visibile
             if (callback) callback(); // callback post-typewriter
         }
     }
@@ -2105,7 +2203,8 @@ async function displayToneModal(toneKey, toneText) {
 
     renderModalToneSwitcher(toneKey);
 
-    titleEl.innerText = `PRISM - Contenuto [${toneKey.toUpperCase()}]`;
+    // Titolo UI rimosso: tono nei dettagli generazione a sinistra
+    if (titleEl) titleEl.innerText = '';
 
     const richHTMLContent = parseAndCleanContentForModal(toneText);
     textEl.innerHTML = `<div style="color: #e4e4e7; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${richHTMLContent}</div>`;
@@ -2116,14 +2215,19 @@ async function displayToneModal(toneKey, toneText) {
         prismBg.style.display = 'none';
     }
     if (modalBox) {
-        modalBox.style.width = '950px';
         modalBox.classList.add('completed-glow');
-        modalBox.style.overflowY = 'auto';
+        modalBox.style.overflow = 'hidden'; // cornice fissa; scorre solo #modal-tone-scroll
+        modalBox.style.width = ''; // dimensioni fisse da CSS
+        modalBox.style.height = '';
     }
+
+    const scrollEl = document.getElementById('modal-tone-scroll');
+    if (scrollEl) scrollEl.scrollTop = 0;
 
     markToneAsGenerated(toneKey, true);
     await ensureModalToneSwitcherReady(toneKey);
     renderToneAssetsAndActions(toneKey);
+    refreshModalToneMeta(toneKey);
     modal.style.display = 'flex';
     triggerUserGuidePhase5IfNeeded();
     return true;
@@ -2162,15 +2266,245 @@ window.openToneModal = async function(toneKey) {
     }
 };
 
-window.closeToneModal = function() { 
-    document.getElementById('output-modal').style.display = 'none';
+/** Snapshot metadati versione corrente (per pannello estensione). */
+let latestModalToneMeta = null;
+/** Tool attualmente aperto nel pannello estensione sidebar. */
+let activeSidebarExtensionTool = null;
+
+window.closeToneModal = function() {
+    const modal = document.getElementById('output-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('tone-modal-fullscreen');
+    }
+    clearToneModalFullscreenLayout();
     if (userGuideCurrentPhase === 5) hideUserGuide();
     if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
     if (pollInterval) clearInterval(pollInterval);
     if (tonePollInterval) clearInterval(tonePollInterval);
     tonePollInterval = null;
     resetWorkspaceSidebarState();
+    resetModalToneMeta();
 };
+
+/** Calcola inset top/bottom così header e footer restano visibili in fullscreen. */
+function applyToneModalFullscreenLayout() {
+    const header = document.querySelector('header');
+    const footer = document.querySelector('.credits-footer');
+    const top = Math.ceil(header?.getBoundingClientRect().height || header?.offsetHeight || 72);
+    const bottom = Math.ceil(footer?.getBoundingClientRect().height || footer?.offsetHeight || 56);
+    document.documentElement.style.setProperty('--tone-fs-top', `${top}px`);
+    document.documentElement.style.setProperty('--tone-fs-bottom', `${bottom}px`);
+    document.body.classList.add('tone-modal-fullscreen-active');
+}
+
+function clearToneModalFullscreenLayout() {
+    document.body.classList.remove('tone-modal-fullscreen-active');
+    document.documentElement.style.removeProperty('--tone-fs-top');
+    document.documentElement.style.removeProperty('--tone-fs-bottom');
+}
+
+/** Espande la modale toni a pagina intera (tra header e footer dashboard). */
+window.expandToneModalFullscreen = function() {
+    const modal = document.getElementById('output-modal');
+    if (!modal || modal.style.display === 'none') return;
+    modal.classList.add('tone-modal-fullscreen');
+    applyToneModalFullscreenLayout();
+    // Ricalcola dopo paint (header fixed può cambiare altezza)
+    requestAnimationFrame(() => {
+        applyToneModalFullscreenLayout();
+        if (activeSidebarExtensionTool === 'generation-details') sizeGenerationDetailsTopicTextarea();
+    });
+};
+
+window.addEventListener('resize', () => {
+    const modal = document.getElementById('output-modal');
+    if (modal?.classList.contains('tone-modal-fullscreen')) {
+        applyToneModalFullscreenLayout();
+    }
+    if (activeSidebarExtensionTool === 'generation-details') {
+        sizeGenerationDetailsTopicTextarea();
+    }
+});
+
+/** Ripristina la modalità finestra (modale sopra la dashboard). */
+window.restoreToneModalWindowed = function() {
+    const modal = document.getElementById('output-modal');
+    if (!modal) return;
+    modal.classList.remove('tone-modal-fullscreen');
+    clearToneModalFullscreenLayout();
+};
+
+/**
+ * Torna alla dashboard chiudendo l'overlay, senza azzerare la sessione toni:
+ * cache/job restano pronti (modale "precaricata" al prossimo open).
+ */
+window.returnToDashboardFromToneModal = function() {
+    window.restoreToneModalWindowed();
+    const modal = document.getElementById('output-modal');
+    if (modal) modal.style.display = 'none';
+    if (userGuideCurrentPhase === 5) hideUserGuide();
+    if (activeTypewriterTimeout) clearTimeout(activeTypewriterTimeout);
+    resetWorkspaceSidebarState();
+};
+
+function resetModalToneMeta() {
+    latestModalToneMeta = null;
+}
+
+function formatModalMetaPlatform(platform) {
+    const raw = String(platform || '').toLowerCase().trim();
+    if (!raw || raw === '—') return '—';
+    if (raw.includes('linkedin')) return 'LinkedIn';
+    if (raw.includes('facebook')) return 'Facebook';
+    if (raw === 'x' || raw.includes('twitter')) return 'X';
+    return platform;
+}
+
+function formatModalMetaLanguage(language) {
+    const raw = String(language || '').toLowerCase().trim();
+    if (!raw || raw === '—') return '—';
+    const map = {
+        italiano: 'Italiano',
+        inglese: 'Inglese',
+        english: 'Inglese',
+        french: 'Francese',
+        francese: 'Francese',
+        spagnolo: 'Spagnolo',
+        spanish: 'Spagnolo',
+        tedesco: 'Tedesco',
+        german: 'Tedesco'
+    };
+    return map[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1));
+}
+
+function getCurrentTopicForModalMeta() {
+    const fromInput = (topicInputTextarea?.value || '').trim();
+    if (fromInput) return fromInput;
+    return '—';
+}
+
+function buildGenerationDetailsHtml(meta) {
+    if (!meta) {
+        return `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Dettagli generazione</h4>
+            <div class="generation-details-empty">Nessuna versione caricata</div>
+        `;
+    }
+
+    const instructions = meta.instructionsHtml
+        || '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+
+    return `
+        <h4 style="font-size:12px; color:#fff; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.5px;">Dettagli generazione</h4>
+        <div class="generation-details-panel" aria-live="polite">
+            <div class="meta-row"><strong>Tono:</strong> ${escapeHtmlCompare(meta.toneLabel || '—')}</div>
+            <div class="meta-row"><strong>Lingua:</strong> ${escapeHtmlCompare(meta.language || '—')}</div>
+            <div class="meta-row"><strong>Piattaforma:</strong> ${escapeHtmlCompare(meta.platform || '—')}</div>
+            <div class="generation-details-topic-wrap">
+                <label for="generation-details-topic">Argomento</label>
+                <textarea id="generation-details-topic" class="generation-details-topic" readonly>${escapeHtmlCompare(meta.topicFull || '—')}</textarea>
+            </div>
+            <div class="meta-row"><strong>Versione:</strong> ${escapeHtmlCompare(meta.versionLabel || '—')}</div>
+            <div class="meta-row"><strong>Timestamp:</strong> ${escapeHtmlCompare(meta.timestamp || '—')}</div>
+            <div class="meta-row"><strong>Istruzioni:</strong> ${instructions}</div>
+        </div>
+    `;
+}
+
+/** Dimensiona la textarea argomento in base allo spazio disponibile nel pannello. */
+function sizeGenerationDetailsTopicTextarea() {
+    const textarea = document.getElementById('generation-details-topic');
+    const body = document.getElementById('sidebar-extension-body');
+    const pane = document.getElementById('sidebar-extension-pane');
+    if (!textarea || !body) return;
+
+    const paneH = (pane?.clientHeight || body.clientHeight || 280);
+    // Usa circa il 35–45% dell'altezza pannello, con limiti ragionevoli
+    const maxH = Math.max(72, Math.min(Math.floor(paneH * 0.42), 280));
+    const minH = 56;
+
+    textarea.style.height = 'auto';
+    const contentH = textarea.scrollHeight || minH;
+    const nextH = Math.min(maxH, Math.max(minH, contentH));
+    textarea.style.height = `${nextH}px`;
+    textarea.style.overflowY = contentH > maxH ? 'auto' : 'hidden';
+}
+
+function renderGenerationDetailsExtension() {
+    const body = document.getElementById('sidebar-extension-body');
+    if (!body || activeSidebarExtensionTool !== 'generation-details') return;
+    body.innerHTML = buildGenerationDetailsHtml(latestModalToneMeta);
+    requestAnimationFrame(() => {
+        sizeGenerationDetailsTopicTextarea();
+        requestAnimationFrame(sizeGenerationDetailsTopicTextarea);
+    });
+}
+
+function setPendingModalToneMeta(partial) {
+    latestModalToneMeta = {
+        toneLabel: partial.toneLabel || '—',
+        language: partial.language || '—',
+        platform: partial.platform || '—',
+        topicFull: partial.topicFull || getCurrentTopicForModalMeta() || '—',
+        versionLabel: partial.versionLabel || 'in aggiornamento…',
+        timestamp: partial.timestamp || '—',
+        instructionsHtml: partial.instructionsHtml
+            || '<em style="opacity:0.7">Nessuna istruzione manuale</em>'
+    };
+    renderGenerationDetailsExtension();
+}
+
+/**
+ * Aggiorna lo snapshot metadati della versione corrente visualizzata.
+ * Se il pannello "Dettagli generazione" è aperto, lo rinfresca.
+ */
+async function refreshModalToneMeta(toneKey) {
+    const key = toneKey || currentActiveToneKey;
+    if (!key) {
+        latestModalToneMeta = null;
+        renderGenerationDetailsExtension();
+        return;
+    }
+
+    try {
+        const versions = await fetchToneVersionsForCompare(key);
+        const current = resolveCompareBaseline(versions);
+
+        const platform = formatModalMetaPlatform(
+            current?.platform && current.platform !== '—'
+                ? current.platform
+                : getSelectedDashboardPlatform()
+        );
+        const language = formatModalMetaLanguage(
+            current?.language && current.language !== '—'
+                ? current.language
+                : getSelectedDashboardLanguage()
+        );
+        const topicFull = getCurrentTopicForModalMeta() || '—';
+        const toneLabel = getToneDefinition(key)?.label || key;
+        const versionLabel = current?.version != null ? `v${current.version}` : '—';
+        const timestamp = formatCompareDate(current?.createdAt);
+        const instructionsHtml = current?.instructions
+            ? escapeHtmlCompare(current.instructions)
+            : '<em style="opacity:0.7">Nessuna istruzione manuale</em>';
+
+        latestModalToneMeta = {
+            toneLabel,
+            language,
+            platform,
+            topicFull,
+            versionLabel,
+            timestamp,
+            instructionsHtml
+        };
+        renderGenerationDetailsExtension();
+    } catch (err) {
+        console.warn('[PRISM META] Aggiornamento metadati fallito:', err?.message || err);
+        latestModalToneMeta = null;
+        renderGenerationDetailsExtension();
+    }
+}
 
 function parseAndCleanContentForModal(text) {
     if (!text) return "";
@@ -2199,39 +2533,13 @@ function resetWorkspaceSidebarState() {
     const sidebar = document.getElementById('modal-sidebar');
     const extensionPane = document.getElementById('sidebar-extension-pane');
     const extensionBody = document.getElementById('sidebar-extension-body');
-    const regenContent = document.getElementById('regen-options');
-    const regenArrow = document.getElementById('arrow-regen-options');
 
     closeSidebarExtension();
-    if (sidebar) sidebar.classList.remove('sidebar-collapsed', 'sidebar-expanded');
+    if (typeof closeCompareDiffModal === 'function') closeCompareDiffModal();
+    if (sidebar) sidebar.classList.remove('sidebar-expanded');
     if (extensionBody) extensionBody.innerHTML = '';
     if (extensionPane) extensionPane.classList.remove('active');
-    if (regenContent) regenContent.style.maxHeight = '0px';
-    if (regenArrow) regenArrow.classList.remove('open');
 }
-
-window.toggleSidebarCollapse = function() {
-    const sidebar = document.getElementById('modal-sidebar');
-    const modalBox = document.getElementById('output-modal-box');
-    if (!sidebar || !modalBox?.classList.contains('completed-glow')) return;
-
-    sidebar.classList.toggle('sidebar-collapsed');
-    if (sidebar.classList.contains('sidebar-collapsed')) closeSidebarExtension();
-};
-
-window.toggleSidebarGroup = function(groupId) {
-    const content = document.getElementById(groupId);
-    const arrow = document.getElementById(`arrow-${groupId}`);
-    if (!content) return;
-
-    if (content.style.maxHeight && content.style.maxHeight !== '0px') {
-        content.style.maxHeight = '0px';
-        if (arrow) arrow.classList.remove('open');
-    } else {
-        content.style.maxHeight = content.scrollHeight + 'px';
-        if (arrow) arrow.classList.add('open');
-    }
-};
 
 window.copyModalText = function() {
     const textEl = document.getElementById('modal-tone-text');
@@ -2253,9 +2561,9 @@ window.copyModalText = function() {
 function buildOverlayPlatformPillsHtml() {
     const currentPlatform = document.querySelector('#settingsRow .platform-pill .pill.active')?.innerText.trim() || 'LinkedIn';
     const platforms = [
-        { label: 'Facebook', html: '<i class="fab fa-facebook"></i> Facebook' },
-        { label: 'LinkedIn', html: '<i class="fab fa-linkedin"></i> LinkedIn' },
-        { label: 'X', html: 'X' }
+        { label: 'Facebook', html: '<i class="fab fa-facebook" aria-hidden="true"></i> Facebook' },
+        { label: 'LinkedIn', html: '<i class="fab fa-linkedin" aria-hidden="true"></i> LinkedIn' },
+        { label: 'X', html: '<i class="fab fa-x-twitter" aria-hidden="true"></i> X' }
     ];
     return platforms.map((p) => {
         const activeClass = p.label === currentPlatform ? ' active' : '';
@@ -2266,12 +2574,12 @@ function buildOverlayPlatformPillsHtml() {
 function buildOverlayLanguagePillsHtml() {
     const currentLang = getSelectedDashboardLanguage();
     const languages = [
-        { id: 'italiano', flag: '🇮🇹', label: 'Italiano' },
-        { id: 'english', flag: '🇬🇧', label: 'English' }
+        { id: 'italiano', flagCode: 'it', label: 'Italiano' },
+        { id: 'english', flagCode: 'gb', label: 'English' }
     ];
     return languages.map((lang) => {
         const activeClass = lang.id === currentLang ? ' active' : '';
-        return `<div class="pill lang-pill-option${activeClass}" data-lang="${lang.id}" onclick="selOverlayLang(this)"><span class="lang-flag" aria-hidden="true">${lang.flag}</span> ${lang.label}</div>`;
+        return `<div class="pill lang-pill-option${activeClass}" data-lang="${lang.id}" onclick="selOverlayLang(this)"><span class="lang-flag" aria-hidden="true"><img class="lang-flag-img" src="https://flagcdn.com/w40/${lang.flagCode}.png" width="18" height="13" alt=""></span> ${lang.label}</div>`;
     }).join('');
 }
 
@@ -2286,10 +2594,7 @@ window.openSidebarExtension = function(toolType) {
     const body = document.getElementById('sidebar-extension-body');
     if (!sidebar || !extensionPane || !body) return;
 
-    if (sidebar.classList.contains('sidebar-collapsed')) {
-        sidebar.classList.remove('sidebar-collapsed');
-    }
-
+    activeSidebarExtensionTool = toolType;
     sidebar.classList.add('sidebar-expanded');
     extensionPane.classList.add('active');
 
@@ -2314,14 +2619,28 @@ window.openSidebarExtension = function(toolType) {
             <div class="overlay-char-counter" id="overlay-chars-left">100 caratteri rimasti</div>
             <button class="overlay-action-btn" onclick="executeSurgicalRegen('instructions')">Rigenera <i class="fas fa-bolt"></i></button>
         `;
-    } else if (toolType === 'compare-versions') {
+    } else if (toolType === 'compare-with-version') {
         body.innerHTML = `
-            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta versioni</h4>
-            <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Vista affiancata per confrontare le modifiche storiche.</p>
-            <div style="border: 1px dashed #27272a; padding: 30px 20px; border-radius: 8px; text-align: center; color: var(--text-dim); font-size:12px; min-height: 120px; display:flex; align-items:center; justify-content:center;">
-                Funzionalità in arrivo con la prossima versione
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta con altra versione</h4>
+            <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5;">Seleziona una bozza dello stesso tono da confrontare con quella corrente.</p>
+            <div id="compare-version-list-mount" class="compare-version-list">
+                <div class="compare-version-empty">Caricamento versioni...</div>
             </div>
         `;
+        loadCompareVersionCards();
+    } else if (toolType === 'compare-with-tone') {
+        body.innerHTML = `
+            <h4 style="font-size:12px; color:#fff; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Confronta con altro tono</h4>
+            <div class="compare-version-empty">Funzionalità in arrivo: confronto tra toni diversi sullo stesso argomento.</div>
+        `;
+    } else if (toolType === 'generation-details') {
+        body.innerHTML = buildGenerationDetailsHtml(latestModalToneMeta);
+        requestAnimationFrame(() => {
+            sizeGenerationDetailsTopicTextarea();
+            requestAnimationFrame(sizeGenerationDetailsTopicTextarea);
+        });
+        // Assicura dati aggiornati alla versione corrente
+        refreshModalToneMeta(currentActiveToneKey);
     }
 };
 
@@ -2330,9 +2649,337 @@ window.closeSidebarExtension = function() {
     const extensionPane = document.getElementById('sidebar-extension-pane');
     const body = document.getElementById('sidebar-extension-body');
 
+    activeSidebarExtensionTool = null;
     if (sidebar) sidebar.classList.remove('sidebar-expanded');
     if (extensionPane) extensionPane.classList.remove('active');
     if (body) body.innerHTML = '';
+};
+
+// ==========================================
+// 8b. CONFRONTO VERSIONI (stesso tono)
+// ==========================================
+
+let compareVersionsCache = []; // elenco versioni normalizzate per le card
+let compareBaselineVersion = null; // versione corrente (sinistra nel diff)
+
+function escapeHtmlCompare(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatCompareDate(value) {
+    if (!value) return '—';
+    try {
+        let date = null;
+        if (typeof value?.toDate === 'function') date = value.toDate();
+        else if (value?.seconds != null) date = new Date(Number(value.seconds) * 1000);
+        else date = new Date(value);
+        if (!date || Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleString('it-IT', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (_) {
+        return '—';
+    }
+}
+
+function getCompareTimestampMs(value) {
+    if (!value) return -1;
+    try {
+        if (typeof value?.toDate === 'function') return value.toDate().getTime();
+        if (value?.seconds != null) return Number(value.seconds) * 1000;
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? -1 : ms;
+    } catch (_) {
+        return -1;
+    }
+}
+
+function normalizeCompareVersionEntry(raw, index) {
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+        return {
+            id: `v-${index}`,
+            version: index + 1,
+            text: raw,
+            platform: '—',
+            language: '—',
+            instructions: '',
+            regeneratedWith: 'total',
+            createdAt: null,
+            createdAtMs: -1
+        };
+    }
+
+    const text = (typeof raw.text === 'string' && raw.text)
+        || (typeof raw.content === 'string' && raw.content)
+        || '';
+    if (!text.trim()) return null;
+
+    const createdAt = raw.createdAt || raw.timestamp || raw.updatedAt || null;
+    return {
+        id: `v-${raw.version != null ? raw.version : index}`,
+        version: Number(raw.version) > 0 ? Number(raw.version) : (index + 1),
+        text,
+        platform: raw.platform || '—',
+        language: raw.language || '—',
+        instructions: String(raw.instructions || '').trim(),
+        regeneratedWith: raw.regeneratedWith || (String(raw.instructions || '').trim() ? 'instructions' : 'total'),
+        createdAt,
+        createdAtMs: getCompareTimestampMs(createdAt)
+    };
+}
+
+function extractNormalizedVersionsFromToneEntry(toneEntry) {
+    if (!toneEntry) return [];
+    const fromVersions = normalizeToneVersions(toneEntry.versions)
+        .map((item, idx) => normalizeCompareVersionEntry(item, idx))
+        .filter(Boolean);
+
+    if (fromVersions.length) {
+        return fromVersions.sort((a, b) => {
+            if (a.version !== b.version) return a.version - b.version;
+            return a.createdAtMs - b.createdAtMs;
+        });
+    }
+
+    // fallback legacy flat text
+    const flat = normalizeCompareVersionEntry({
+        text: typeof toneEntry === 'string' ? toneEntry : (toneEntry.text || toneEntry.content || ''),
+        version: Number(toneEntry.version) || 1,
+        platform: toneEntry.platform,
+        language: toneEntry.language,
+        instructions: toneEntry.instructions,
+        createdAt: toneEntry.createdAt || toneEntry.updatedAt
+    }, 0);
+    return flat ? [flat] : [];
+}
+
+async function fetchToneVersionsForCompare(toneKey) {
+    const jobId = sessionStorage.getItem('prism_last_job_id');
+    const key = toneKey || currentActiveToneKey;
+    if (!key) return [];
+
+    // Preferisci Firestore; fallback cache locale
+    try {
+        if (jobId && window.db) {
+            const docResult = await resolveJobContentDocument(jobId);
+            if (docResult?.data) {
+                const tones = extractTonesFromJob(docResult.data);
+                const entry = findToneEntry(tones, key);
+                const list = extractNormalizedVersionsFromToneEntry(entry);
+                if (list.length) return list;
+            }
+        }
+    } catch (err) {
+        console.warn('[PRISM COMPARE] Lettura versioni FS fallita:', err.message);
+    }
+
+    const cachedEntry = findToneEntry(globalCacheTones, key);
+    return extractNormalizedVersionsFromToneEntry(cachedEntry);
+}
+
+function resolveCompareBaseline(versions) {
+    if (!versions.length) return null;
+    // Baseline = SEMPRE l'ultima versione (numero più alto), non match per testo
+    return versions.reduce((best, current) => {
+        if (!best) return current;
+        const bestV = Number(best.version) || 0;
+        const curV = Number(current.version) || 0;
+        if (curV !== bestV) return curV > bestV ? current : best;
+        return (current.createdAtMs || 0) >= (best.createdAtMs || 0) ? current : best;
+    }, null);
+}
+
+function buildCompareVersionCardHtml(version, baselineId) {
+    const instructions = version.instructions
+        ? escapeHtmlCompare(version.instructions)
+        : '<em style="opacity:0.7">Nessuna istruzione</em>';
+    const safeIdAttr = escapeHtmlCompare(version.id);
+    const safeIdJs = JSON.stringify(String(version.id));
+    return `
+        <div class="compare-version-card" data-version-id="${safeIdAttr}" onclick='selectCompareVersion(${safeIdJs})'>
+            <div class="compare-version-card-title">
+                <span>Versione ${escapeHtmlCompare(version.version)}</span>
+                <span style="color:#3b82f6;font-size:10px;">CONFRONTA</span>
+            </div>
+            <div class="compare-version-card-meta">
+                <div><strong>Data creazione:</strong> ${escapeHtmlCompare(formatCompareDate(version.createdAt))}</div>
+                <div><strong>Piattaforma:</strong> ${escapeHtmlCompare(version.platform || '—')}</div>
+                <div><strong>Lingua:</strong> ${escapeHtmlCompare(version.language || '—')}</div>
+                <div><strong>Istruzioni:</strong> ${instructions}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function loadCompareVersionCards() {
+    const mount = document.getElementById('compare-version-list-mount');
+    if (!mount) return;
+
+    const toneKey = currentActiveToneKey;
+    if (!toneKey) {
+        mount.innerHTML = '<div class="compare-version-empty">Nessun tono attivo da confrontare.</div>';
+        return;
+    }
+
+    const versions = await fetchToneVersionsForCompare(toneKey);
+    compareVersionsCache = versions;
+    compareBaselineVersion = resolveCompareBaseline(versions);
+
+    if (!versions.length) {
+        mount.innerHTML = '<div class="compare-version-empty">Nessuna versione disponibile per questo tono.</div>';
+        return;
+    }
+
+    // Solo versioni PRECEDENTI (version < corrente). Mai l'ultima appena creata.
+    const baselineNum = Number(compareBaselineVersion?.version) || 0;
+    const selectable = versions
+        .filter((v) => (Number(v.version) || 0) < baselineNum)
+        .sort((a, b) => (Number(b.version) || 0) - (Number(a.version) || 0));
+
+    if (!selectable.length) {
+        mount.innerHTML = `
+            <div class="compare-version-empty">
+                C\'è una sola versione per «${escapeHtmlCompare(toneKey)}».<br>
+                Genera o rigenera il tono per abilitare il confronto con versioni precedenti.
+            </div>
+        `;
+        return;
+    }
+
+    const baselineLabel = compareBaselineVersion
+        ? `Versione corrente: v${compareBaselineVersion.version}`
+        : 'Versione corrente non rilevata';
+
+    mount.innerHTML = `
+        <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px;">${escapeHtmlCompare(baselineLabel)} — seleziona una versione precedente.</p>
+        ${selectable.map((v) => buildCompareVersionCardHtml(v, compareBaselineVersion?.id)).join('')}
+    `;
+}
+
+function tokenizeForDiff(text) {
+    return String(text || '').match(/\s+|[^\s]+/g) || [];
+}
+
+function computeSideBySideWordDiff(leftText, rightText) {
+    const a = tokenizeForDiff(leftText);
+    const b = tokenizeForDiff(rightText);
+    const m = a.length;
+    const n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+    for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+            dp[i][j] = a[i] === b[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const leftParts = [];
+    const rightParts = [];
+    let i = 0;
+    let j = 0;
+
+    while (i < m && j < n) {
+        if (a[i] === b[j]) {
+            leftParts.push({ type: 'same', value: a[i] });
+            rightParts.push({ type: 'same', value: b[j] });
+            i++;
+            j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            leftParts.push({ type: 'removed', value: a[i] });
+            i++;
+        } else {
+            rightParts.push({ type: 'added', value: b[j] });
+            j++;
+        }
+    }
+    while (i < m) {
+        leftParts.push({ type: 'removed', value: a[i++] });
+    }
+    while (j < n) {
+        rightParts.push({ type: 'added', value: b[j++] });
+    }
+
+    return { leftParts, rightParts };
+}
+
+function renderDiffPartsToHtml(parts) {
+    return parts.map((part) => {
+        const safe = escapeHtmlCompare(part.value);
+        if (part.type === 'removed') return `<span class="diff-removed">${safe}</span>`;
+        if (part.type === 'added') return `<span class="diff-added">${safe}</span>`;
+        return safe;
+    }).join('');
+}
+
+function buildCompareMetaHtml(version, roleLabel) {
+    if (!version) {
+        return `<div class="meta-title">${escapeHtmlCompare(roleLabel)}</div><div>Dati non disponibili</div>`;
+    }
+    const instructions = version.instructions
+        ? escapeHtmlCompare(version.instructions)
+        : '<em style="opacity:0.7">Nessuna istruzione</em>';
+    return `
+        <div class="meta-title">${escapeHtmlCompare(roleLabel)} · v${escapeHtmlCompare(version.version)}</div>
+        <div><strong>Data creazione:</strong> ${escapeHtmlCompare(formatCompareDate(version.createdAt))}</div>
+        <div><strong>Piattaforma:</strong> ${escapeHtmlCompare(version.platform || '—')}</div>
+        <div><strong>Lingua:</strong> ${escapeHtmlCompare(version.language || '—')}</div>
+        <div><strong>Istruzioni:</strong> ${instructions}</div>
+    `;
+}
+
+window.selectCompareVersion = function(versionId) {
+    const selected = compareVersionsCache.find((v) => v.id === versionId);
+    if (!selected) {
+        return showPrismErrorSafe('Versione non trovata.', { title: 'Confronto non disponibile' });
+    }
+    if (!compareBaselineVersion) {
+        return showPrismErrorSafe('Versione corrente non disponibile per il confronto.', { title: 'Confronto non disponibile' });
+    }
+    if (selected.id === compareBaselineVersion.id) {
+        return showPrismErrorSafe('Seleziona una versione diversa da quella corrente.', { title: 'Stessa versione' });
+    }
+    openCompareDiffModal(compareBaselineVersion, selected);
+};
+
+window.openCompareDiffModal = function(leftVersion, rightVersion) {
+    const overlay = document.getElementById('compare-diff-modal');
+    const metaLeft = document.getElementById('compare-diff-meta-left');
+    const metaRight = document.getElementById('compare-diff-meta-right');
+    const bodyLeft = document.getElementById('compare-diff-body-left');
+    const bodyRight = document.getElementById('compare-diff-body-right');
+    const subtitle = document.getElementById('compare-diff-subtitle');
+    if (!overlay || !metaLeft || !metaRight || !bodyLeft || !bodyRight) return;
+
+    const toneLabel = (currentActiveToneKey || 'tono').toUpperCase();
+    if (subtitle) {
+        subtitle.textContent = `Tono ${toneLabel}: versione corrente (sinistra) vs versione selezionata (destra).`;
+    }
+
+    metaLeft.innerHTML = buildCompareMetaHtml(leftVersion, 'Versione corrente');
+    metaRight.innerHTML = buildCompareMetaHtml(rightVersion, 'Versione selezionata');
+
+    const { leftParts, rightParts } = computeSideBySideWordDiff(leftVersion.text || '', rightVersion.text || '');
+    bodyLeft.innerHTML = renderDiffPartsToHtml(leftParts);
+    bodyRight.innerHTML = renderDiffPartsToHtml(rightParts);
+
+    overlay.classList.add('open');
+};
+
+window.closeCompareDiffModal = function() {
+    const overlay = document.getElementById('compare-diff-modal');
+    if (overlay) overlay.classList.remove('open');
 };
 
 window.selOverlayP = function(el) {
@@ -2367,7 +3014,15 @@ window.executeSurgicalRegen = function(type) {
         language = getSelectedOverlayLanguage();
     }
 
-    const instructions = document.getElementById('overlay-instructions-input')?.value.trim() || '';
+    // Cattura istruzioni PRIMA di chiudere il pannello (il DOM del textarea viene distrutto)
+    const instructions = type === 'instructions'
+        ? (document.getElementById('overlay-instructions-input')?.value.trim() || '')
+        : '';
+
+    if (type === 'instructions' && !instructions) {
+        return showPrismErrorSafe('Inserisci le istruzioni manuali prima di rigenerare.', { title: 'Istruzioni mancanti' });
+    }
+
     console.log(`[PRISM] Rigenerazione innescata — modalità: ${type}, piattaforma: ${platformLabel}, lingua: ${language}, istruzioni: ${instructions || '(nessuna)'}`);
 
     closeSidebarExtension();
@@ -2379,7 +3034,8 @@ window.executeSurgicalRegen = function(type) {
 
     generateSingleToneWithInteractivePrism(currentActiveToneKey, jobId, {
         piattaforma: normalizePlatformLabelToApi(platformLabel),
-        linguaOutput: language
+        linguaOutput: language,
+        instructions
     });
 };
 

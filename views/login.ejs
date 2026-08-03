@@ -202,11 +202,22 @@
 
                 // Prepariamo la query leggendo il documento dell'utente all'interno della raccolta 'users'
                 const userRef = window.db.collection("users").doc(user.uid);
-                // Effettuiamo la chiamata di lettura su Firestore per recuperare lo snapshot del profilo
-                const userDoc = await userRef.get();
+                // Effettuiamo la chiamata di lettura su Firestore per recuperare lo snapshot del profilo.
+                // Se le regole bloccano la read (permission-denied), trattiamo il caso come onboarding.
+                let userDoc = null;
+                let canReadUserDoc = true;
+                try {
+                    userDoc = await userRef.get();
+                } catch (readError) {
+                    if (readError?.code === "permission-denied") {
+                        canReadUserDoc = false;
+                    } else {
+                        throw readError;
+                    }
+                }
 
                 // Se l'utente non è censito nel database (nuovo iscritto), avviamo l'onboarding
-                if (!userDoc.exists) {
+                if (!canReadUserDoc || !userDoc?.exists) {
                     // Generiamo l'ID Company univoco basandoci sul formato camelCase concordato
                     const generatedCompanyId = `company_${user.uid}`;
                     // Avviamo un'operazione batch per garantire l'atomicità della doppia scrittura
@@ -234,7 +245,7 @@
                         regenerations_left: 5,                  // Impostiamo il limite iniziale di 100 rigenerazioni
                         created_at: firebase.firestore.FieldValue.serverTimestamp(), // Timestamp di creazione
                         updated_at: firebase.firestore.FieldValue.serverTimestamp()  // Timestamp di aggiornamento
-                    });
+                    }, { merge: true });
 
                     // Prepariamo la scrittura del profilo utente agganciato alla nuova Company
                     batch.set(userRef, {
@@ -246,7 +257,7 @@
                         custom_enabled_tones: null,               // Nessun override personalizzato sui toni
                         created_at: firebase.firestore.FieldValue.serverTimestamp(), // Timestamp di creazione
                         updated_at: firebase.firestore.FieldValue.serverTimestamp()  // Timestamp di aggiornamento
-                    });
+                    }, { merge: true });
 
                     // Eseguiamo il commit del batch scrivendo contemporaneamente entrambi i documenti
                     await batch.commit();
@@ -262,10 +273,14 @@
                 // Intercettiamo eventuali eccezioni ripristinando lo stato del pulsante
                 btn.disabled = false;
                 // Mostriamo la notifica con l'errore descrittivo generato durante il login
+                const isPermissionError = error?.code === 'permission-denied' || String(error?.message || '').toLowerCase().includes('missing or insufficient permissions');
+                const uiMessage = isPermissionError
+                    ? "Accesso Google riuscito, ma Firestore ha negato i permessi necessari. Verifica le Security Rules per users/{uid} e companies/{companyId}."
+                    : `Errore Google Sign-In: ${error.message}`;
                 if (typeof window.showPrismError === 'function') {
-                    showPrismError(`Errore Google Sign-In: ${error.message}`, { title: 'Accesso non riuscito' });
+                    showPrismError(uiMessage, { title: 'Accesso non riuscito' });
                 } else {
-                    showAlert("error", `Errore Google Sign-In: ${error.message}`);
+                    showAlert("error", uiMessage);
                 }
             }
         }
